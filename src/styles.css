@@ -1,0 +1,244 @@
+:root {
+  --bg: #1e1f22;
+  --bg-panel: #26282c;
+  --bg-elev: #2e3035;
+  --border: #3a3d43;
+  --text: #e6e7e9;
+  --text-dim: #9aa0a6;
+  --accent: #4c8dff;
+  --accent-dim: #37507a;
+  --danger: #e5534b;
+  --ok: #4caf7d;
+  --row-h: 34px;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+input,
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  width: 100%;
+}
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ── Layout ─────────────────────────────────────────────────────────────── */
+.editor {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  grid-template-columns: 220px 1fr 280px;
+  grid-template-areas:
+    'top top top'
+    'left center right'
+    'status status status';
+  height: 100vh;
+  width: 100vw;
+}
+.top-bar {
+  grid-area: top;
+}
+.left-panel {
+  grid-area: left;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.center-area {
+  grid-area: center;
+  position: relative;
+  min-width: 0;
+}
+.right-panel {
+  grid-area: right;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+}
+.status-bar {
+  grid-area: status;
+}
+
+/* ── Top bar ────────────────────────────────────────────────────────────── */
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.top-bar .brand {
+  font-weight: 600;
+  margin-right: 10px;
+}
+.top-bar .sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+/* ── Panels ─────────────────────────────────────────────────────────────── */
+.panel-section {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-section h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+.nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.nav-list li {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-dim);
+}
+.nav-list li:hover {
+  background: var(--bg-elev);
+  color: var(--text);
+}
+.nav-list li.active {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.parts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.parts-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.parts-list li:hover {
+  background: var(--bg-elev);
+}
+.parts-list li.selected {
+  background: var(--accent-dim);
+}
+.parts-list .dim {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Properties ─────────────────────────────────────────────────────────── */
+.field {
+  margin-bottom: 8px;
+}
+.field label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.issues {
+  margin-top: 8px;
+}
+.issue {
+  padding: 4px 6px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.issue.error {
+  background: rgba(229, 83, 75, 0.15);
+  color: #f2a099;
+}
+.issue.warning {
+  background: rgba(230, 180, 60, 0.15);
+  color: #e6c060;
+}
+
+/* ── Status bar ─────────────────────────────────────────────────────────── */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 5px 12px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.status-bar .spacer {
+  flex: 1;
+}
+
+/* ── 3D view controls ───────────────────────────────────────────────────── */
+.view-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  max-width: 260px;
+}
+.view-toolbar button {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.empty-hint {
+  color: var(--text-dim);
+  padding: 10px;
+  font-size: 12px;
+}
