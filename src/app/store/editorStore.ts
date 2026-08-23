@@ -7,7 +7,7 @@
  */
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { PartId } from '@/core/model/ids';
+import type { FurnitureId, PartId } from '@/core/model/ids';
 import type {
   Furniture,
   Material,
@@ -15,15 +15,30 @@ import type {
   Project,
   ProjectSettings,
 } from '@/core/model/types';
-import { createFurniture, createPart, createProject } from '@/core/model/factory';
-import { findAssemblyOfPart, findPart, firstAssembly } from '@/core/model/selectors';
+import { createAssembly, createFurniture, createPart, createProject } from '@/core/model/factory';
+import {
+  findAssemblyOfPart,
+  findFurniture,
+  findFurnitureOfPart,
+  findPart,
+  firstAssembly,
+} from '@/core/model/selectors';
 import type { CreatePartInput } from '@/core/model/factory';
+import {
+  buildCabinet,
+  defaultCabinetParameters,
+  normalizeCabinetParameters,
+  readCabinetParameters,
+  rebuildCabinet,
+  type CabinetParameters,
+} from '@/engines/furniture/cabinet';
 
 const HISTORY_LIMIT = 100;
 
 export interface EditorState {
   project: Project;
   selectedPartId: PartId | null;
+  activeFurnitureId: FurnitureId | null;
   past: Project[];
   future: Project[];
 
@@ -37,6 +52,11 @@ export interface EditorState {
   // ── Изделия ────────────────────────────────────────────────────────────────
   addFurniture: (name?: string) => void;
   removeFurniture: (id: Furniture['id']) => void;
+  setActiveFurniture: (id: FurnitureId | null) => void;
+
+  // ── Параметрический шкаф ────────────────────────────────────────────────────
+  createCabinet: (name?: string) => FurnitureId;
+  updateCabinetParams: (id: FurnitureId, patch: Partial<CabinetParameters>) => void;
 
   // ── Детали ────────────────────────────────────────────────────────────────
   addPart: (input?: CreatePartInput) => PartId;
@@ -73,6 +93,7 @@ export const useEditorStore = create<EditorState>()(
     return {
       project: createProject(),
       selectedPartId: null,
+      activeFurnitureId: null,
       past: [],
       future: [],
 
@@ -80,6 +101,7 @@ export const useEditorStore = create<EditorState>()(
         set((state) => {
           state.project = createProject(name ? { name } : {});
           state.selectedPartId = null;
+          state.activeFurnitureId = null;
           state.past = [];
           state.future = [];
         });
@@ -89,6 +111,8 @@ export const useEditorStore = create<EditorState>()(
         set((state) => {
           state.project = project;
           state.selectedPartId = null;
+          state.activeFurnitureId =
+            project.furnitures.find((f) => f.type === 'cabinet')?.id ?? null;
           state.past = [];
           state.future = [];
         });
@@ -106,9 +130,53 @@ export const useEditorStore = create<EditorState>()(
           p.furnitures.push(createFurniture(name ?? `Изделие ${p.furnitures.length + 1}`));
         }),
 
-      removeFurniture: (id) =>
+      removeFurniture: (id) => {
         commit((p) => {
           p.furnitures = p.furnitures.filter((f) => f.id !== id);
+        });
+        if (get().activeFurnitureId === id) set((s) => void (s.activeFurnitureId = null));
+      },
+
+      setActiveFurniture: (id) => set((s) => void (s.activeFurnitureId = id)),
+
+      createCabinet: (name) => {
+        const project = get().project;
+        const bodyMaterial =
+          project.materials.find((m) => m.kind === 'ldsp')?.id ??
+          project.materials[0]?.id ??
+          null;
+        const backMaterial =
+          project.materials.find((m) => m.kind === 'other')?.id ?? bodyMaterial;
+        const params = defaultCabinetParameters({ material: bodyMaterial, backMaterial });
+
+        const furniture = createFurniture(name ?? `Шкаф ${project.furnitures.length + 1}`);
+        furniture.type = 'cabinet';
+        furniture.assemblies = [createAssembly('Корпус')];
+        furniture.params = params as unknown as Record<string, unknown>;
+
+        const built = buildCabinet(params);
+        furniture.assemblies[0].parts = built.parts;
+        furniture.sections = built.sections;
+
+        commit((p) => {
+          p.furnitures.push(furniture);
+        });
+        set((s) => void (s.activeFurnitureId = furniture.id));
+        return furniture.id;
+      },
+
+      updateCabinetParams: (id, patch) =>
+        commit((p) => {
+          const furniture = findFurniture(p, id);
+          if (!furniture || furniture.type !== 'cabinet') return;
+          const current = readCabinetParameters(furniture.params);
+          const next = normalizeCabinetParameters(patch, current);
+          const assembly = furniture.assemblies[0];
+          const existing = assembly ? assembly.parts : [];
+          const built = rebuildCabinet(existing, next);
+          if (assembly) assembly.parts = built.parts;
+          furniture.sections = built.sections;
+          furniture.params = next as unknown as Record<string, unknown>;
         }),
 
       addPart: (input) => {
@@ -140,7 +208,14 @@ export const useEditorStore = create<EditorState>()(
           if (material) Object.assign(material, patch);
         }),
 
-      selectPart: (id) => set((state) => void (state.selectedPartId = id)),
+      selectPart: (id) =>
+        set((state) => {
+          state.selectedPartId = id;
+          if (id) {
+            const furniture = findFurnitureOfPart(state.project, id);
+            if (furniture) state.activeFurnitureId = furniture.id;
+          }
+        }),
 
       undo: () => {
         const cur = get().project;

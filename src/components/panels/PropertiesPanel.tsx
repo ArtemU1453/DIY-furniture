@@ -16,16 +16,15 @@ export function PropertiesPanel() {
   const selectedPartId = useEditorStore((s) => s.selectedPartId);
   const part = useEditorStore((s) => (selectedPartId ? findPart(s.project, selectedPartId) : undefined));
   const materials = useEditorStore((s) => s.project.materials);
+  const edges = useEditorStore((s) => s.project.edges);
   const updatePart = useEditorStore((s) => s.updatePart);
   const removePart = useEditorStore((s) => s.removePart);
 
   if (!part) {
     return (
-      <div className="right-panel">
-        <div className="panel-section">
-          <h3>Свойства</h3>
-          <div className="empty-hint">Выберите деталь в 3D или в списке слева.</div>
-        </div>
+      <div className="panel-section">
+        <h3>Свойства</h3>
+        <div className="empty-hint">Выберите деталь в 3D или в списке слева.</div>
       </div>
     );
   }
@@ -33,7 +32,7 @@ export function PropertiesPanel() {
   const issues = validatePart(part);
 
   return (
-    <div className="right-panel">
+    <>
       <div className="panel-section">
         <h3>Деталь</h3>
         <TextField label="Название" value={part.name} onCommit={(v) => updatePart(part.id, { name: v })} />
@@ -103,7 +102,24 @@ export function PropertiesPanel() {
         {EDGE_LABELS.map(([side, label]) => (
           <div className="field" key={side}>
             <label>{label}</label>
-            <span className="dim">{part.edges[side] ? 'задана' : '—'}</span>
+            <select
+              value={part.edges[side] ?? ''}
+              onChange={(e) =>
+                updatePart(part.id, {
+                  edges: {
+                    ...part.edges,
+                    [side]: e.target.value ? (e.target.value as never) : null,
+                  },
+                })
+              }
+            >
+              <option value="">Нет</option>
+              {edges.map((ed) => (
+                <option key={ed.id} value={ed.id}>
+                  {ed.name}
+                </option>
+              ))}
+            </select>
           </div>
         ))}
       </div>
@@ -113,6 +129,6 @@ export function PropertiesPanel() {
           Удалить деталь
         </button>
       </div>
-    </div>
+    </>
   );
 }

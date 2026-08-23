@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { ThreeEvent } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import type { Material, Part } from '@/core/model/types';
 import { partBoxGeometry } from '@/core/geometry/partGeometry';
 
@@ -10,6 +11,7 @@ interface Props {
   part: Part;
   material?: Material;
   selected: boolean;
+  showNumber?: boolean;
   onSelect: (id: Part['id']) => void;
 }
 
@@ -18,10 +20,11 @@ interface Props {
  * (Part → partBoxGeometry → BoxGeometry). Изменение размеров детали
  * автоматически меняет визуальный размер (пересчёт useMemo по зависимостям).
  */
-export function PartMesh({ part, material, selected, onSelect }: Props) {
+export function PartMesh({ part, material, selected, showNumber, onSelect }: Props) {
   const geom = useMemo(() => partBoxGeometry(part), [part]);
 
   const color = material?.color ?? '#c9b18a';
+  const number = part.metadata?.number as string | undefined;
 
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
@@ -52,6 +55,22 @@ export function PartMesh({ part, material, selected, onSelect }: Props) {
         roughness={0.75}
         metalness={0.05}
       />
+      {showNumber && number && (
+        <Html center distanceFactor={4} style={{ pointerEvents: 'none' }}>
+          <div
+            style={{
+              background: 'rgba(20,20,24,0.8)',
+              color: '#fff',
+              padding: '1px 5px',
+              borderRadius: 3,
+              fontSize: 11,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {number}
+          </div>
+        </Html>
+      )}
     </mesh>
   );
 }

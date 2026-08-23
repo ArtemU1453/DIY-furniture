@@ -33,7 +33,7 @@ function CameraRig({ apiRef }: { apiRef: React.MutableRefObject<CameraApi | null
   return null;
 }
 
-export function Scene3D() {
+export function Scene3D({ showNumbers }: { showNumbers?: boolean }) {
   const project = useEditorStore((s) => s.project);
   const selectedPartId = useEditorStore((s) => s.selectedPartId);
   const selectPart = useEditorStore((s) => s.selectPart);
@@ -74,6 +74,7 @@ export function Scene3D() {
             part={part}
             material={part.material ? materialMap.get(part.material) : undefined}
             selected={part.id === selectedPartId}
+            showNumber={showNumbers}
             onSelect={selectPart}
           />
         ))}

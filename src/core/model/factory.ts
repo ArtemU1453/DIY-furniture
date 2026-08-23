@@ -48,15 +48,31 @@ export function createDefaultMaterial(): Material {
   };
 }
 
-/** Встроенная минимальная кромка. */
-export function createDefaultEdge(): EdgeMaterial {
+/** Встроенный материал задней стенки (ХДФ). */
+export function createDefaultBackMaterial(): Material {
   return {
+    id: newMaterialId(),
+    name: 'ХДФ 3 мм Белый',
+    kind: 'other',
+    thickness: 3,
+    sheet: { length: 2745, width: 1700 },
+    density: 800,
+    grain: 'none',
+    allowRotate: true,
+    color: '#e9e6df',
+  };
+}
+
+/** Встроенные варианты кромки (0.4 / 1 / 2 мм). */
+export function createDefaultEdges(): EdgeMaterial[] {
+  const mk = (thickness: number): EdgeMaterial => ({
     id: newEdgeMaterialId(),
-    name: 'Кромка ПВХ 2 мм Белая',
-    thickness: 2,
+    name: `Кромка ПВХ ${thickness} мм`,
+    thickness,
     width: 23,
     color: '#f2f0ec',
-  };
+  });
+  return [mk(0.4), mk(1), mk(2)];
 }
 
 export interface CreatePartInput {
@@ -119,7 +135,8 @@ export interface CreateProjectInput {
 export function createProject(input: CreateProjectInput = {}): Project {
   const now = new Date().toISOString();
   const material = createDefaultMaterial();
-  const edge = createDefaultEdge();
+  const backMaterial = createDefaultBackMaterial();
+  const edges = createDefaultEdges();
   const furniture = createFurniture('Изделие 1');
 
   return {
@@ -129,8 +146,8 @@ export function createProject(input: CreateProjectInput = {}): Project {
     createdAt: now,
     updatedAt: now,
     settings: { ...DEFAULT_SETTINGS },
-    materials: [material],
-    edges: [edge],
+    materials: [material, backMaterial],
+    edges,
     hardware: [],
     furnitures: [furniture],
   };

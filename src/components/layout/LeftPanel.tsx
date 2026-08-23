@@ -26,9 +26,10 @@ const NAV: Array<[NavSection, string]> = [
 interface Props {
   section: NavSection;
   onSection: (s: NavSection) => void;
+  onCreateFurniture: () => void;
 }
 
-export function LeftPanel({ section, onSection }: Props) {
+export function LeftPanel({ section, onSection, onCreateFurniture }: Props) {
   const project = useEditorStore((s) => s.project);
   const parts = useMemo(() => allParts(project), [project]);
   const selectedPartId = useEditorStore((s) => s.selectedPartId);
@@ -37,6 +38,11 @@ export function LeftPanel({ section, onSection }: Props) {
 
   return (
     <div className="left-panel">
+      <div className="panel-section">
+        <button style={{ width: '100%' }} onClick={onCreateFurniture}>
+          + Создать изделие
+        </button>
+      </div>
       <div className="panel-section">
         <h3>Разделы</h3>
         <ul className="nav-list">

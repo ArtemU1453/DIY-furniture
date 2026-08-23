@@ -178,16 +178,34 @@ export interface Assembly {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Секция — внутреннее вертикальное отделение корпуса (между боковинами и
+ * перегородками). В секции размещаются полки/двери/ящики (на будущих этапах).
+ * Координаты — в системе корпуса (мм).
+ */
+export interface Section {
+  id: string;
+  index: number;
+  x: Mm; // левая граница секции (внутр. координата)
+  width: Mm;
+  y: Mm; // нижняя граница внутреннего пространства
+  height: Mm;
+  z: Mm; // передняя граница
+  depth: Mm;
+}
+
 /** Изделие (шкаф, тумба, стол, произвольное). */
 export interface Furniture {
   id: FurnitureId;
   name: string;
-  type: string; // ключ типа изделия ('custom' в этом каркасе)
+  type: string; // ключ типа изделия: 'custom' | 'cabinet' | ...
   position: Vec3;
   rotation: Rotation;
   assemblies: Assembly[];
-  /** Параметры типа изделия (используются параметрическим движком позже). */
-  params?: Record<string, number | string | boolean>;
+  /** Параметры типа изделия (для параметрического движка). Формат — по типу. */
+  params?: Record<string, unknown>;
+  /** Секции, вычисленные генератором (для будущего наполнения). */
+  sections?: Section[];
   metadata?: Record<string, unknown>;
 }
 
