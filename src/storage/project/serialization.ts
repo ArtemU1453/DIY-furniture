@@ -47,6 +47,8 @@ export function deserializeProject(json: string): Project {
   assertProjectShape(parsed);
 
   const project = parsed as Project;
+  // Обратная совместимость: связи фурнитуры появились позже.
+  if (!Array.isArray(project.hardwareConnections)) project.hardwareConnections = [];
   const major = project.version.split('.')[0];
   const currentMajor = PROJECT_FORMAT_VERSION.split('.')[0];
   if (major !== currentMajor) {

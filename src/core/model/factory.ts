@@ -8,6 +8,7 @@ import {
   newAssemblyId,
   newEdgeMaterialId,
   newFurnitureId,
+  newHardwareId,
   newMaterialId,
   newPartId,
   newProjectId,
@@ -17,7 +18,9 @@ import {
   type Assembly,
   type EdgeMaterial,
   type Furniture,
+  type Hardware,
   type Material,
+  type MaterialKind,
   type Part,
   type PartRole,
   type Project,
@@ -63,16 +66,107 @@ export function createDefaultBackMaterial(): Material {
   };
 }
 
+/** Демонстрационный каталог листовых материалов (создаётся при новом проекте). */
+export function createStandardMaterials(): Material[] {
+  const mk = (
+    name: string,
+    kind: MaterialKind,
+    thickness: number,
+    sheet: { length: number; width: number },
+    color: string,
+    density: number,
+  ): Material => ({
+    id: newMaterialId(),
+    name,
+    kind,
+    thickness,
+    sheet,
+    density,
+    grain: 'none',
+    allowRotate: true,
+    kerf: 3.2,
+    color,
+  });
+  return [
+    mk('ЛДСП 16 мм Белый', 'ldsp', 16, { length: 2800, width: 2070 }, '#f2f0ec', 650),
+    mk('ЛДСП 18 мм Белый', 'ldsp', 18, { length: 2800, width: 2070 }, '#eeeae2', 650),
+    mk('ЛДСП 25 мм Белый', 'ldsp', 25, { length: 2800, width: 2070 }, '#e8e3da', 650),
+    mk('МДФ 16 мм', 'mdf', 16, { length: 2800, width: 2070 }, '#d9c7a8', 750),
+    mk('ХДФ 3 мм Белый', 'other', 3, { length: 2745, width: 1700 }, '#e9e6df', 800),
+  ];
+}
+
 /** Встроенные варианты кромки (0.4 / 1 / 2 мм). */
 export function createDefaultEdges(): EdgeMaterial[] {
   const mk = (thickness: number): EdgeMaterial => ({
     id: newEdgeMaterialId(),
-    name: `Кромка ПВХ ${thickness} мм`,
+    name: `Кромка ABS ${thickness} мм`,
     thickness,
     width: 23,
     color: '#f2f0ec',
   });
   return [mk(0.4), mk(1), mk(2)];
+}
+
+/** Демонстрационная фурнитура (конфирмат / шкант / полкодержатель). */
+export function createDefaultHardware(): Hardware[] {
+  return [
+    {
+      id: newHardwareId(),
+      name: 'Конфирмат 7×50',
+      category: 'confirmat',
+      parameters: { diameter: 7, length: 50, headDiameter: 7 },
+    },
+    {
+      id: newHardwareId(),
+      name: 'Шкант 8×30',
+      category: 'dowel',
+      parameters: { diameter: 8, length: 30 },
+    },
+    {
+      id: newHardwareId(),
+      name: 'Полкодержатель Ø5',
+      category: 'shelf-support',
+      parameters: { diameter: 5 },
+    },
+  ];
+}
+
+/** Заготовка нового материала для редактора. */
+export function createBlankMaterial(): Material {
+  return {
+    id: newMaterialId(),
+    name: 'Новый материал',
+    kind: 'ldsp',
+    thickness: 16,
+    sheet: { length: 2750, width: 1830 },
+    density: 650,
+    grain: 'none',
+    allowRotate: true,
+    kerf: 3.2,
+    color: '#d9c7a8',
+  };
+}
+
+/** Заготовка новой кромки для редактора. */
+export function createBlankEdge(): EdgeMaterial {
+  return {
+    id: newEdgeMaterialId(),
+    name: 'Новая кромка',
+    thickness: 1,
+    width: 23,
+    color: '#d9c7a8',
+  };
+}
+
+/** Заготовка новой фурнитуры для редактора. */
+export function createBlankHardware(): Hardware {
+  return {
+    id: newHardwareId(),
+    name: 'Новый крепёж',
+    category: 'confirmat',
+    parameters: { diameter: 7, length: 50 },
+  };
 }
 
 export interface CreatePartInput {
@@ -134,8 +228,7 @@ export interface CreateProjectInput {
  */
 export function createProject(input: CreateProjectInput = {}): Project {
   const now = new Date().toISOString();
-  const material = createDefaultMaterial();
-  const backMaterial = createDefaultBackMaterial();
+  const materials = createStandardMaterials();
   const edges = createDefaultEdges();
   const furniture = createFurniture('Изделие 1');
 
@@ -146,9 +239,10 @@ export function createProject(input: CreateProjectInput = {}): Project {
     createdAt: now,
     updatedAt: now,
     settings: { ...DEFAULT_SETTINGS },
-    materials: [material, backMaterial],
+    materials,
     edges,
-    hardware: [],
+    hardware: createDefaultHardware(),
+    hardwareConnections: [],
     furnitures: [furniture],
   };
 }

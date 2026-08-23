@@ -7,9 +7,20 @@
  */
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { FurnitureId, PartId } from '@/core/model/ids';
 import type {
+  EdgeMaterialId,
+  FurnitureId,
+  HardwareConnectionId,
+  HardwareId,
+  MaterialId,
+  PartId,
+} from '@/core/model/ids';
+import { newHardwareConnectionId } from '@/core/model/ids';
+import type {
+  EdgeMaterial,
   Furniture,
+  Hardware,
+  HardwareConnection,
   Material,
   Part,
   Project,
@@ -23,15 +34,31 @@ import {
   findPart,
   firstAssembly,
 } from '@/core/model/selectors';
+import {
+  edgeUsageCount,
+  hardwareUsageCount,
+  materialUsageCount,
+  validateConnection,
+} from '@/core/validation/catalog';
 import type { CreatePartInput } from '@/core/model/factory';
 import {
   buildCabinet,
-  defaultCabinetParameters,
   normalizeCabinetParameters,
   readCabinetParameters,
   rebuildCabinet,
+  defaultCabinetParameters,
   type CabinetParameters,
 } from '@/engines/furniture/cabinet';
+
+export interface DeleteResult {
+  ok: boolean;
+  message?: string;
+}
+export interface CreateConnectionResult {
+  ok: boolean;
+  id?: HardwareConnectionId;
+  message?: string;
+}
 
 const HISTORY_LIMIT = 100;
 
@@ -39,6 +66,7 @@ export interface EditorState {
   project: Project;
   selectedPartId: PartId | null;
   activeFurnitureId: FurnitureId | null;
+  selectedConnectionId: HardwareConnectionId | null;
   past: Project[];
   future: Project[];
 
@@ -64,7 +92,29 @@ export interface EditorState {
   updatePart: (id: PartId, patch: Partial<Part>) => void;
 
   // ── Материалы ───────────────────────────────────────────────────────────────
-  updateMaterial: (id: Material['id'], patch: Partial<Material>) => void;
+  addMaterial: (material: Material) => void;
+  updateMaterial: (id: MaterialId, patch: Partial<Material>) => void;
+  removeMaterial: (id: MaterialId) => DeleteResult;
+
+  // ── Кромка ──────────────────────────────────────────────────────────────────
+  addEdge: (edge: EdgeMaterial) => void;
+  updateEdge: (id: EdgeMaterialId, patch: Partial<EdgeMaterial>) => void;
+  removeEdge: (id: EdgeMaterialId) => DeleteResult;
+
+  // ── Фурнитура ─────────────────────────────────────────────────────────────
+  addHardware: (hardware: Hardware) => void;
+  updateHardware: (id: HardwareId, patch: Partial<Hardware>) => void;
+  removeHardware: (id: HardwareId) => DeleteResult;
+
+  // ── Соединения фурнитуры ────────────────────────────────────────────────────
+  addConnection: (input: {
+    hardwareId: HardwareId;
+    partAId: PartId;
+    partBId: PartId;
+    parameters?: HardwareConnection['parameters'];
+  }) => CreateConnectionResult;
+  removeConnection: (id: HardwareConnectionId) => void;
+  selectConnection: (id: HardwareConnectionId | null) => void;
 
   // ── Выбор ────────────────────────────────────────────────────────────────
   selectPart: (id: PartId | null) => void;
@@ -90,10 +140,31 @@ export const useEditorStore = create<EditorState>()(
       });
     };
 
+    /**
+     * Пересобрать все шкафы, использующие материал как корпусной, синхронизируя
+     * их толщину с толщиной материала (мутирует переданный черновик проекта).
+     */
+    const syncCabinetsToMaterial = (project: Project, materialId: MaterialId) => {
+      for (const f of project.furnitures) {
+        if (f.type !== 'cabinet') continue;
+        const params = readCabinetParameters(f.params);
+        if (params.material !== materialId) continue;
+        const material = project.materials.find((m) => m.id === materialId);
+        if (!material) continue;
+        const next = normalizeCabinetParameters({ thickness: material.thickness }, params);
+        const assembly = f.assemblies[0];
+        const built = rebuildCabinet(assembly ? assembly.parts : [], next);
+        if (assembly) assembly.parts = built.parts;
+        f.sections = built.sections;
+        f.params = next as unknown as Record<string, unknown>;
+      }
+    };
+
     return {
       project: createProject(),
       selectedPartId: null,
       activeFurnitureId: null,
+      selectedConnectionId: null,
       past: [],
       future: [],
 
@@ -102,6 +173,7 @@ export const useEditorStore = create<EditorState>()(
           state.project = createProject(name ? { name } : {});
           state.selectedPartId = null;
           state.activeFurnitureId = null;
+          state.selectedConnectionId = null;
           state.past = [];
           state.future = [];
         });
@@ -113,6 +185,7 @@ export const useEditorStore = create<EditorState>()(
           state.selectedPartId = null;
           state.activeFurnitureId =
             project.furnitures.find((f) => f.type === 'cabinet')?.id ?? null;
+          state.selectedConnectionId = null;
           state.past = [];
           state.future = [];
         });
@@ -202,11 +275,91 @@ export const useEditorStore = create<EditorState>()(
           if (part) Object.assign(part, patch);
         }),
 
+      addMaterial: (material) => commit((p) => void p.materials.push(material)),
+
       updateMaterial: (id, patch) =>
         commit((p) => {
           const material = p.materials.find((m) => m.id === id);
-          if (material) Object.assign(material, patch);
+          if (!material) return;
+          const thicknessChanged = patch.thickness !== undefined && patch.thickness !== material.thickness;
+          Object.assign(material, patch);
+          if (thicknessChanged) syncCabinetsToMaterial(p, id);
         }),
+
+      removeMaterial: (id) => {
+        const used = materialUsageCount(get().project, id);
+        if (used > 0) {
+          return {
+            ok: false,
+            message: `Материал используется в ${used} деталях. Сначала назначьте другой материал.`,
+          };
+        }
+        commit((p) => void (p.materials = p.materials.filter((m) => m.id !== id)));
+        return { ok: true };
+      },
+
+      addEdge: (edge) => commit((p) => void p.edges.push(edge)),
+
+      updateEdge: (id, patch) =>
+        commit((p) => {
+          const edge = p.edges.find((e) => e.id === id);
+          if (edge) Object.assign(edge, patch);
+        }),
+
+      removeEdge: (id) => {
+        const used = edgeUsageCount(get().project, id);
+        if (used > 0) {
+          return {
+            ok: false,
+            message: `Кромка используется на ${used} сторонах деталей. Сначала снимите её назначение.`,
+          };
+        }
+        commit((p) => void (p.edges = p.edges.filter((e) => e.id !== id)));
+        return { ok: true };
+      },
+
+      addHardware: (hardware) => commit((p) => void p.hardware.push(hardware)),
+
+      updateHardware: (id, patch) =>
+        commit((p) => {
+          const hw = p.hardware.find((h) => h.id === id);
+          if (hw) Object.assign(hw, patch);
+        }),
+
+      removeHardware: (id) => {
+        const used = hardwareUsageCount(get().project, id);
+        if (used > 0) {
+          return {
+            ok: false,
+            message: `Фурнитура используется в ${used} соединениях. Сначала удалите соединения.`,
+          };
+        }
+        commit((p) => void (p.hardware = p.hardware.filter((h) => h.id !== id)));
+        return { ok: true };
+      },
+
+      addConnection: (input) => {
+        const issues = validateConnection(input, get().project);
+        if (issues.length > 0) {
+          return { ok: false, message: issues[0].message };
+        }
+        const connection: HardwareConnection = {
+          id: newHardwareConnectionId(),
+          hardwareId: input.hardwareId,
+          partAId: input.partAId,
+          partBId: input.partBId,
+          parameters: input.parameters,
+        };
+        commit((p) => void p.hardwareConnections.push(connection));
+        return { ok: true, id: connection.id };
+      },
+
+      removeConnection: (id) => {
+        commit((p) => void (p.hardwareConnections = p.hardwareConnections.filter((c) => c.id !== id)));
+        if (get().selectedConnectionId === id) set((s) => void (s.selectedConnectionId = null));
+      },
+
+      selectConnection: (id) => set((s) => void (s.selectedConnectionId = id)),
 
       selectPart: (id) =>
         set((state) => {

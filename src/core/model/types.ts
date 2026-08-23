@@ -16,6 +16,7 @@ import type {
   MaterialId,
   EdgeMaterialId,
   HardwareId,
+  HardwareConnectionId,
   MachiningId,
   DrawingId,
 } from './ids';
@@ -104,21 +105,41 @@ export interface MachiningOperation {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type HardwareCategory =
-  | 'hinge'
-  | 'slide'
-  | 'leg'
-  | 'handle'
-  | 'connector'
-  | 'shelf-support'
-  | 'rod'
+  | 'confirmat' // конфирмат
+  | 'minifix' // эксцентрик
+  | 'dowel' // шкант
+  | 'shelf-support' // полкодержатель
+  | 'hinge' // петля
+  | 'slide' // направляющая
+  | 'connector' // стяжка
+  | 'corner' // уголок
+  | 'screw' // саморез
   | 'other';
 
+/** Единица фурнитуры (крепёж/навес). Количество НЕ хранится — оно
+ *  вычисляется из связей (HardwareConnection). */
 export interface Hardware {
   id: HardwareId;
   name: string;
   category: HardwareCategory;
-  quantity: number;
+  manufacturer?: string;
+  model?: string;
+  /** Параметры крепежа: diameter, length, headDiameter и т.п. */
+  parameters?: Record<string, number | string | boolean>;
   cost?: { perUnit?: number; currency?: string };
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Семантическая связь: крепёж соединяет детали. НЕ содержит отверстий/координат
+ * — реальные технологические операции строит MachiningEngine на следующем этапе.
+ */
+export interface HardwareConnection {
+  id: HardwareConnectionId;
+  hardwareId: HardwareId;
+  partAId: PartId;
+  partBId: PartId;
+  parameters?: Record<string, number | string | boolean>;
   metadata?: Record<string, unknown>;
 }
 
@@ -277,6 +298,7 @@ export interface Project {
   materials: Material[];
   edges: EdgeMaterial[];
   hardware: Hardware[];
+  hardwareConnections: HardwareConnection[];
   furnitures: Furniture[];
   metadata?: Record<string, unknown>;
 }

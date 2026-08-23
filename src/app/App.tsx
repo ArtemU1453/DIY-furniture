@@ -8,10 +8,12 @@ import { ProjectsDialog } from '@/components/panels/ProjectsDialog';
 import { SettingsDialog } from '@/components/panels/SettingsDialog';
 import { CreateFurnitureDialog } from '@/components/panels/CreateFurnitureDialog';
 import { PartsTable } from '@/components/panels/PartsTable';
+import { MaterialsView } from '@/components/panels/MaterialsView';
+import { HardwareView } from '@/components/panels/HardwareView';
 import { Scene3D } from '@/features/designer/Scene3D';
 import { createAutosaver } from '@/storage/backup/autosave';
 
-type CenterView = '3d' | 'table';
+type CenterView = '3d' | 'table' | 'materials' | 'hardware';
 
 export function App() {
   const [status, setStatus] = useState('');
@@ -72,18 +74,26 @@ export function App() {
         onSection={(s) => {
           setSection(s);
           if (s === 'parts') setCenterView('table');
+          else if (s === 'materials') setCenterView('materials');
+          else if (s === 'hardware') setCenterView('hardware');
           else if (s === 'furniture' || s === 'project') setCenterView('3d');
         }}
         onCreateFurniture={() => setCreateOpen(true)}
       />
       <div className="center-area">
         <div className="center-tabs">
-          <button className={centerView === '3d' ? 'active' : ''} onClick={() => setCenterView('3d')}>
-            3D
-          </button>
-          <button className={centerView === 'table' ? 'active' : ''} onClick={() => setCenterView('table')}>
-            Детали
-          </button>
+          {(
+            [
+              ['3d', '3D'],
+              ['table', 'Детали'],
+              ['materials', 'Материалы'],
+              ['hardware', 'Фурнитура'],
+            ] as Array<[CenterView, string]>
+          ).map(([v, label]) => (
+            <button key={v} className={centerView === v ? 'active' : ''} onClick={() => setCenterView(v)}>
+              {label}
+            </button>
+          ))}
           {centerView === '3d' && (
             <label className="num-toggle">
               <input type="checkbox" checked={showNumbers} onChange={(e) => setShowNumbers(e.target.checked)} />
@@ -92,7 +102,10 @@ export function App() {
           )}
         </div>
         <div className="center-body">
-          {centerView === '3d' ? <Scene3D showNumbers={showNumbers} /> : <PartsTable />}
+          {centerView === '3d' && <Scene3D showNumbers={showNumbers} />}
+          {centerView === 'table' && <PartsTable />}
+          {centerView === 'materials' && <MaterialsView />}
+          {centerView === 'hardware' && <HardwareView />}
         </div>
       </div>
       <RightPanel />

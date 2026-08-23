@@ -1,13 +1,56 @@
 import { useMemo, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
+import { Line, OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { useEditorStore } from '@/app/store/editorStore';
-import { allParts } from '@/core/model/selectors';
+import { allParts, findPart } from '@/core/model/selectors';
+import { partWorldAABB } from '@/core/geometry/partGeometry';
 import type { MaterialId } from '@/core/model/ids';
-import type { Material } from '@/core/model/types';
+import type { Material, Project } from '@/core/model/types';
 import { PartMesh } from './PartMesh';
 import { ViewControls, type StandardView, VIEW_POSITIONS } from './ViewControls';
+
+const MM_TO_UNIT = 1 / 1000;
+
+/** Визуализация связей фурнитуры: линия между центрами деталей + точка. */
+function ConnectionsLayer({ project, selectedId }: { project: Project; selectedId: string | null }) {
+  const lines = useMemo(() => {
+    const out: Array<{ id: string; a: [number, number, number]; b: [number, number, number]; sel: boolean }> = [];
+    for (const c of project.hardwareConnections) {
+      const pa = findPart(project, c.partAId);
+      const pb = findPart(project, c.partBId);
+      if (!pa || !pb) continue;
+      const ca = partWorldAABB(pa);
+      const cb = partWorldAABB(pb);
+      const mid = (x: { min: number; max: number }) => (x.min + x.max) / 2;
+      out.push({
+        id: c.id,
+        a: [mid({ min: ca.min.x, max: ca.max.x }) * MM_TO_UNIT, mid({ min: ca.min.y, max: ca.max.y }) * MM_TO_UNIT, mid({ min: ca.min.z, max: ca.max.z }) * MM_TO_UNIT],
+        b: [mid({ min: cb.min.x, max: cb.max.x }) * MM_TO_UNIT, mid({ min: cb.min.y, max: cb.max.y }) * MM_TO_UNIT, mid({ min: cb.min.z, max: cb.max.z }) * MM_TO_UNIT],
+        sel: c.id === selectedId,
+      });
+    }
+    return out;
+  }, [project, selectedId]);
+
+  return (
+    <group>
+      {lines.map((l) => {
+        const mid: [number, number, number] = [(l.a[0] + l.b[0]) / 2, (l.a[1] + l.b[1]) / 2, (l.a[2] + l.b[2]) / 2];
+        const color = l.sel ? '#ffcf4c' : '#4c8dff';
+        return (
+          <group key={l.id}>
+            <Line points={[l.a, l.b]} color={color} lineWidth={l.sel ? 3 : 1.5} />
+            <mesh position={mid}>
+              <sphereGeometry args={[l.sel ? 0.02 : 0.014, 12, 12]} />
+              <meshBasicMaterial color={color} />
+            </mesh>
+          </group>
+        );
+      })}
+    </group>
+  );
+}
 
 interface CameraApi {
   setView: (view: StandardView) => void;
@@ -36,6 +79,7 @@ function CameraRig({ apiRef }: { apiRef: React.MutableRefObject<CameraApi | null
 export function Scene3D({ showNumbers }: { showNumbers?: boolean }) {
   const project = useEditorStore((s) => s.project);
   const selectedPartId = useEditorStore((s) => s.selectedPartId);
+  const selectedConnectionId = useEditorStore((s) => s.selectedConnectionId);
   const selectPart = useEditorStore((s) => s.selectPart);
 
   const apiRef = useRef<CameraApi | null>(null);
@@ -48,6 +92,12 @@ export function Scene3D({ showNumbers }: { showNumbers?: boolean }) {
     for (const m of materials) map.set(m.id, m);
     return map;
   }, [materials]);
+
+  const edgeColorOf = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const e of project.edges) map.set(e.id, e.color);
+    return (id: string | null) => (id ? map.get(id) : undefined);
+  }, [project.edges]);
 
   return (
     <>
@@ -75,9 +125,12 @@ export function Scene3D({ showNumbers }: { showNumbers?: boolean }) {
             material={part.material ? materialMap.get(part.material) : undefined}
             selected={part.id === selectedPartId}
             showNumber={showNumbers}
+            edgeColorOf={edgeColorOf}
             onSelect={selectPart}
           />
         ))}
+
+        <ConnectionsLayer project={project} selectedId={selectedConnectionId} />
 
         <OrbitControls makeDefault enablePan enableZoom enableRotate />
       </Canvas>
