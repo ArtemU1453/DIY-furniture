@@ -5,6 +5,7 @@
 import { registerCuttingEngine } from './cutting/CuttingEngine';
 import { BasicShelfEngine } from './cutting/BasicShelfEngine';
 import { registerFurnitureEngine, CustomFurnitureEngine } from './furniture/FurnitureEngine';
+import { CabinetEngine } from './furniture/cabinet/CabinetEngine';
 import { registerMachiningEngine, NoopMachiningEngine } from './machining/MachiningEngine';
 import { registerDrawingEngine, BoundsDrawingEngine } from './drawings/DrawingEngine';
 
@@ -16,6 +17,7 @@ export function bootstrapEngines(): void {
 
   registerCuttingEngine(new BasicShelfEngine());
   registerFurnitureEngine(new CustomFurnitureEngine());
+  registerFurnitureEngine(new CabinetEngine());
   registerMachiningEngine(new NoopMachiningEngine());
   registerDrawingEngine(new BoundsDrawingEngine());
 }

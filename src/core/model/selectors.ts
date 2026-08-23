@@ -4,7 +4,7 @@
  *
  * Не мутируют модель. Используются и в UI (через store), и в движках.
  */
-import type { PartId } from './ids';
+import type { FurnitureId, PartId } from './ids';
 import type { Assembly, Furniture, Part, Project } from './types';
 
 /** Плоский список всех деталей проекта (с учётом quantity — по одной записи). */
@@ -55,4 +55,16 @@ export function firstAssembly(project: Project): Assembly | undefined {
 /** Первое изделие проекта. */
 export function firstFurniture(project: Project): Furniture | undefined {
   return project.furnitures[0];
+}
+
+/** Найти изделие по id. */
+export function findFurniture(project: Project, id: FurnitureId): Furniture | undefined {
+  return project.furnitures.find((f) => f.id === id);
+}
+
+/** Найти изделие, содержащее деталь. */
+export function findFurnitureOfPart(project: Project, partId: PartId): Furniture | undefined {
+  return project.furnitures.find((f) =>
+    f.assemblies.some((a) => a.parts.some((p) => p.id === partId)),
+  );
 }

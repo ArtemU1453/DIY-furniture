@@ -44,3 +44,37 @@ export function partBoxGeometry(part: Part): BoxGeometry {
 export function partFaceArea(part: Part): number {
   return Math.max(0, part.width) * Math.max(0, part.height);
 }
+
+export interface AABB {
+  min: { x: number; y: number; z: number };
+  max: { x: number; y: number; z: number };
+}
+
+/**
+ * Осеориентированный габаритный бокс детали в мировых координатах с учётом
+ * поворота (повороты кратны 90°). position трактуется как центр.
+ */
+export function partWorldAABB(part: Part): AABB {
+  const g = partBoxGeometry(part);
+  const half = { x: g.size.x / 2, y: g.size.y / 2, z: g.size.z / 2 };
+  // Матрица поворота Эйлера в порядке XYZ.
+  const { x: rx, y: ry, z: rz } = g.rotation;
+  const cx = Math.cos(rx), sx = Math.sin(rx);
+  const cy = Math.cos(ry), sy = Math.sin(ry);
+  const cz = Math.cos(rz), sz = Math.sin(rz);
+  // R = Rz * Ry * Rx
+  const m = [
+    cy * cz, cz * sx * sy - cx * sz, cx * cz * sy + sx * sz,
+    cy * sz, cx * cz + sx * sy * sz, -cz * sx + cx * sy * sz,
+    -sy, cy * sx, cx * cy,
+  ];
+  // Мировые полу-габариты = |R| · half.
+  const hx = Math.abs(m[0]) * half.x + Math.abs(m[1]) * half.y + Math.abs(m[2]) * half.z;
+  const hy = Math.abs(m[3]) * half.x + Math.abs(m[4]) * half.y + Math.abs(m[5]) * half.z;
+  const hz = Math.abs(m[6]) * half.x + Math.abs(m[7]) * half.y + Math.abs(m[8]) * half.z;
+  const c = g.position;
+  return {
+    min: { x: c.x - hx, y: c.y - hy, z: c.z - hz },
+    max: { x: c.x + hx, y: c.y + hy, z: c.z + hz },
+  };
+}

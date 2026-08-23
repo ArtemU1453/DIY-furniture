@@ -85,8 +85,37 @@ select:focus {
 }
 .center-area {
   grid-area: center;
-  position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+}
+.center-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.center-tabs button.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.center-tabs .num-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  width: auto;
+  color: var(--text-dim);
+}
+.center-tabs .num-toggle input {
+  width: auto;
+}
+.center-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 .right-panel {
   grid-area: right;
