@@ -3,7 +3,7 @@
  * Показываются только реально рассчитанные величины: количество, площадь
  * материала, предварительная длина кромки. Раскрой листов здесь НЕ имитируется.
  */
-import type { Material, Part } from '@/core/model/types';
+import type { EdgeMaterial, Material, Part } from '@/core/model/types';
 import type { MaterialId, PartId } from '@/core/model/ids';
 
 export interface SpecRow {
@@ -16,6 +16,10 @@ export interface SpecRow {
   thickness: number;
   materialId: MaterialId | null;
   materialName: string;
+  edgeLeft: string;
+  edgeRight: string;
+  edgeTop: string;
+  edgeBottom: string;
 }
 
 export interface SpecTotals {
@@ -36,9 +40,16 @@ function planeDims(part: Part): { length: number; width: number } {
   return { length: Math.max(a, b), width: Math.min(a, b) };
 }
 
-export function buildSpecification(parts: Part[], materials: Material[]): Specification {
+export function buildSpecification(
+  parts: Part[],
+  materials: Material[],
+  edges: EdgeMaterial[] = [],
+): Specification {
   const matName = new Map<MaterialId, string>();
   for (const m of materials) matName.set(m.id, m.name);
+  const edgeName = new Map<string, string>();
+  for (const e of edges) edgeName.set(e.id, e.name);
+  const edgeLabel = (id: string | null): string => (id ? (edgeName.get(id) ?? '—') : '—');
 
   const rows: SpecRow[] = [];
   let partCount = 0;
@@ -66,6 +77,10 @@ export function buildSpecification(parts: Part[], materials: Material[]): Specif
       thickness: part.thickness,
       materialId: part.material,
       materialName: part.material ? (matName.get(part.material) ?? '—') : '—',
+      edgeLeft: edgeLabel(part.edges.left),
+      edgeRight: edgeLabel(part.edges.right),
+      edgeTop: edgeLabel(part.edges.top),
+      edgeBottom: edgeLabel(part.edges.bottom),
     });
   }
 

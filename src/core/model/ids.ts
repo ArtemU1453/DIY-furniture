@@ -16,6 +16,7 @@ export type PartId = Id<'Part'>;
 export type MaterialId = Id<'Material'>;
 export type EdgeMaterialId = Id<'EdgeMaterial'>;
 export type HardwareId = Id<'Hardware'>;
+export type HardwareConnectionId = Id<'HardwareConnection'>;
 export type MachiningId = Id<'MachiningOperation'>;
 export type DrawingId = Id<'Drawing'>;
 
@@ -39,6 +40,9 @@ export function newEdgeMaterialId(): EdgeMaterialId {
 }
 export function newHardwareId(): HardwareId {
   return uuid() as HardwareId;
+}
+export function newHardwareConnectionId(): HardwareConnectionId {
+  return uuid() as HardwareConnectionId;
 }
 export function newMachiningId(): MachiningId {
   return uuid() as MachiningId;

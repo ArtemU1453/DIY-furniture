@@ -21,6 +21,7 @@ export function Modal({ title, onClose, children }: Props) {
       onClick={onClose}
     >
       <div
+        className="modal-root"
         style={{
           background: 'var(--bg-panel)',
           border: '1px solid var(--border)',
