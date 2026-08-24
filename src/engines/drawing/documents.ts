@@ -14,6 +14,9 @@ import { buildAssemblyDocument } from './assembly';
 import { buildPartsDocument, buildPartPage } from './part';
 import { buildCuttingDocument } from './cutting';
 import { buildSpecificationDocument } from './specification';
+import { buildPartsListDocument } from './partsList';
+import { buildHardwareListDocument } from './hardwareList';
+import { buildProjectSummaryDocument } from './summary';
 import { buildProductionReport } from './report';
 import type { DocumentType, DrawingDocument } from './sheet';
 
@@ -25,12 +28,20 @@ export interface DocumentDescriptor {
   title: string;
 }
 
+/**
+ * Порядок документов в комплекте (§25): титульная/итоговая → сборочный →
+ * спецификации → чертежи деталей → присадка → карта раскроя. specification и
+ * report сохранены для обратной совместимости.
+ */
 export const DOCUMENT_LIST: DocumentDescriptor[] = [
-  { key: 'assembly', type: 'ASSEMBLY_DRAWING', title: 'Чертёж изделия' },
-  { key: 'parts', type: 'PART_DRAWING', title: 'Деталировка' },
+  { key: 'summary', type: 'PROJECT_SUMMARY', title: 'Итоговая информация' },
+  { key: 'assembly', type: 'ASSEMBLY_DRAWING', title: 'Сборочный чертёж' },
+  { key: 'partsList', type: 'PARTS_LIST', title: 'Спецификация деталей' },
+  { key: 'hardwareList', type: 'HARDWARE_LIST', title: 'Спецификация фурнитуры' },
+  { key: 'parts', type: 'PART_DRAWING', title: 'Чертежи деталей' },
   { key: 'machining', type: 'MACHINING_DRAWING', title: 'Присадка' },
   { key: 'cutting', type: 'CUTTING_DRAWING', title: 'Карта раскроя' },
-  { key: 'specification', type: 'SPECIFICATION', title: 'Спецификация' },
+  { key: 'specification', type: 'SPECIFICATION', title: 'Спецификация (сводная)' },
   { key: 'report', type: 'PRODUCTION_REPORT', title: 'Производственный отчёт' },
 ];
 
@@ -48,7 +59,10 @@ function buildMachiningDocument(project: Project): DrawingDocument {
 /** Построить документ по ключу. */
 export function buildDocument(project: Project, key: string): DrawingDocument {
   switch (key) {
+    case 'summary': return buildProjectSummaryDocument(project);
     case 'assembly': return buildAssemblyDocument(project);
+    case 'partsList': return buildPartsListDocument(project);
+    case 'hardwareList': return buildHardwareListDocument(project);
     case 'parts': return buildPartsDocument(project);
     case 'machining': return buildMachiningDocument(project);
     case 'cutting': return buildCuttingDocument(project);
@@ -84,4 +98,74 @@ export function isDocumentsOutdated(project: Project): boolean {
 
 export function documentStatus(project: Project): DocumentStatus {
   return isDocumentsOutdated(project) ? 'OUTDATED' : 'CURRENT';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DocumentModel — формальная модель документа с метаданными и статусом.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Метаданные одного документа (id, тип, версия, статус, источник). */
+export interface DocumentMeta {
+  id: string;
+  key: string;
+  type: DocumentType;
+  title: string;
+  projectId: string;
+  generatedAt: string;
+  sourceModelVersion: string;
+  version: string; // версия комплекта документов (1.0 → 1.1)
+  status: DocumentStatus;
+}
+
+export interface DocumentModelEntry {
+  meta: DocumentMeta;
+  doc: DrawingDocument;
+}
+
+/** DocumentModel — весь комплект документов проекта с метаданными. */
+export interface DocumentModel {
+  projectId: string;
+  version: string;
+  generatedAt: string;
+  sourceModelVersion: string;
+  status: DocumentStatus;
+  documents: DocumentModelEntry[];
+}
+
+/** Построить формальную модель документов из производственной модели. */
+export function buildDocumentModel(project: Project): DocumentModel {
+  const sourceModelVersion = documentsSignature(project);
+  const status = documentStatus(project);
+  const version = project.documents.docVersion ?? '1.0';
+  const generatedAt = new Date().toISOString();
+
+  const documents: DocumentModelEntry[] = DOCUMENT_LIST.map((d) => {
+    const doc = buildDocument(project, d.key);
+    return {
+      meta: {
+        id: doc.id,
+        key: d.key,
+        type: d.type,
+        title: d.title,
+        projectId: String(project.id),
+        generatedAt,
+        sourceModelVersion,
+        version,
+        status,
+      },
+      doc,
+    };
+  });
+
+  return { projectId: String(project.id), version, generatedAt, sourceModelVersion, status, documents };
+}
+
+/** Следующая версия комплекта документов: 1.0 → 1.1 → … (major при .9 → +1.0). */
+export function nextDocVersion(prev: string | undefined): string {
+  if (!prev) return '1.0';
+  const m = /^(\d+)\.(\d+)$/.exec(prev);
+  if (!m) return '1.0';
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  return minor >= 9 ? `${major + 1}.0` : `${major}.${minor + 1}`;
 }

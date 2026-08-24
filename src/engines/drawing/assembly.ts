@@ -8,6 +8,7 @@ import { partWorldAABB, type AABB } from '@/core/geometry/partGeometry';
 import { finalizeScene, type Prim } from './scene';
 import { hDim, renderDimension, vDim } from './dimensions';
 import { pickScale } from './layout';
+import { positionNumbers } from './positions';
 import type { DrawingDocument, DrawingPage, Orientation, SheetFormat } from './sheet';
 
 const FORMAT: SheetFormat = 'A3';
@@ -32,8 +33,22 @@ export function buildAssemblyDocument(project: Project): DrawingDocument {
 
   const rect = (x: number, y: number, w: number, h: number) => prims.push({ kind: 'rect', x, y, w, h, stroke: '#33373d', sw: 0.4, fill: 'none' });
 
-  // Вид спереди (XY).
-  for (const b of boxes) rect(S(b.min.x - minX), S(b.min.y - minY), S(b.max.x - b.min.x), S(b.max.y - b.min.y));
+  // Вид спереди (XY) + позиционные номера (балоны).
+  const positions = positionNumbers(project);
+  const shownPositions = new Set<number>();
+  parts.forEach((p, i) => {
+    const b = boxes[i];
+    rect(S(b.min.x - minX), S(b.min.y - minY), S(b.max.x - b.min.x), S(b.max.y - b.min.y));
+    const pos = positions.get(p.id);
+    // Балон позиции — по одному на каждую уникальную позицию (не загромождаем).
+    if (pos !== undefined && !shownPositions.has(pos)) {
+      shownPositions.add(pos);
+      const cx = S((b.min.x + b.max.x) / 2 - minX);
+      const cy = S((b.min.y + b.max.y) / 2 - minY);
+      prims.push({ kind: 'circle', cx, cy, r: 5, stroke: '#1a1b1e', sw: 0.4, fill: '#ffffff' });
+      prims.push({ kind: 'text', x: cx, y: cy, text: String(pos), size: 3.4, bold: true, color: '#1a1b1e', anchor: 'middle', baseline: 'middle' });
+    }
+  });
   // Вид сбоку (ZY) справа.
   const sideOx = S(W) + S(gap);
   for (const b of boxes) rect(sideOx + S(b.min.z - minZ), S(b.min.y - minY), S(b.max.z - b.min.z), S(b.max.y - b.min.y));

@@ -44,6 +44,24 @@ export function buildPartPage(project: Project, part: Part, ops: MachiningOperat
   if (eT) prims.push({ kind: 'line', x1: 0, y1: S(h), x2: S(w), y2: S(h), color: eT, w: 2 });
   if (eB) prims.push({ kind: 'line', x1: 0, y1: 0, x2: S(w), y2: 0, color: eB, w: 2 });
 
+  // ── Направление текстуры (если задано) ─────────────────────────────────────
+  if (part.grain !== 'none') {
+    // 'length' — вдоль длинной стороны детали; 'width' — вдоль короткой.
+    const longIsHeight = h >= w;
+    const alongY = (part.grain === 'length') === longIsHeight;
+    const cx = S(w) / 2;
+    const cy = S(h) / 2;
+    const len = Math.min(S(w), S(h)) * 0.3;
+    const gc = '#7a8aa8';
+    if (alongY) {
+      prims.push({ kind: 'line', x1: cx, y1: cy - len, x2: cx, y2: cy + len, color: gc, w: 0.6 });
+      prims.push({ kind: 'polyline', pts: [[cx - len * 0.2, cy + len - len * 0.25], [cx, cy + len], [cx + len * 0.2, cy + len - len * 0.25]], color: gc, w: 0.6 });
+    } else {
+      prims.push({ kind: 'line', x1: cx - len, y1: cy, x2: cx + len, y2: cy, color: gc, w: 0.6 });
+      prims.push({ kind: 'polyline', pts: [[cx + len - len * 0.25, cy - len * 0.2], [cx + len, cy], [cx + len - len * 0.25, cy + len * 0.2]], color: gc, w: 0.6 });
+    }
+  }
+
   // ── Присадка на видах ────────────────────────────────────────────────────
   const sideView = { x: S(w) + S(gap), y: 0, w: S(t), h: S(h) };
   const topView = { x: 0, y: -S(gap) - S(t), w: S(w), h: S(t) };

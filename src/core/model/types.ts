@@ -470,10 +470,32 @@ export interface CuttingState {
   report?: CuttingReport;
 }
 
+/** Запись истории генерации документов (локальная, без облака). */
+export interface DocumentGenerationRecord {
+  generatedAt: string; // ISO
+  modelVersion: string; // сигнатура модели
+  docVersion: string; // версия комплекта документов (1.0, 1.1, …)
+  documents: string[]; // ключи сгенерированных документов
+  status: 'CURRENT' | 'ERROR';
+}
+
+/**
+ * Ручные настройки чертежа — ОТДЕЛЬНЫ от производственной модели (не влияют на
+ * геометрию деталей). Масштаб по документу и видимость необязательных слоёв.
+ */
+export interface DrawingSettings {
+  scaleOverrides: Record<string, number | 'AUTO'>; // ключ документа → масштаб
+  hidden: Record<string, boolean>; // ключ слоя → скрыт ли (напр. 'grain', 'edges')
+}
+
 /** Состояние документации. version — сигнатура модели на момент генерации
- *  (для статуса OUTDATED). Сами документы — производные, не хранятся. */
+ *  (для статуса OUTDATED). Сами документы — производные, не хранятся.
+ *  docVersion — независимая версия комплекта документов (1.0 → 1.1). */
 export interface DocumentsState {
   version?: string;
+  docVersion?: string;
+  history?: DocumentGenerationRecord[];
+  settings?: DrawingSettings;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
