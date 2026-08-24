@@ -1,7 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CuttingSheetResult, Placement } from '@/core/model/types';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import type { CuttingSheetResult, GrainDirection, Placement } from '@/core/model/types';
 
 const SHEET_GAP = 200; // мм между листами на карте
+
+/** Флаги наличия кромки по сторонам детали (в системе координат раскладки). */
+export interface EdgeFlags {
+  left: boolean;
+  right: boolean;
+  top: boolean;
+  bottom: boolean;
+}
+
+/** Императивный API управления масштабом карты. */
+export interface CuttingMapHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  fit: () => void;
+  reset100: () => void;
+}
 
 interface SheetLayout {
   sheet: CuttingSheetResult;
@@ -13,8 +29,11 @@ interface Props {
   sheets: CuttingSheetResult[];
   selectedPieceId: string | null;
   manual: boolean;
+  showCuts?: boolean;
   onSelect: (pieceId: string | null) => void;
   onMove: (pieceId: string, sheetIndex: number, x: number, y: number) => void;
+  grainOf?: (p: Placement) => GrainDirection;
+  edgesOf?: (p: Placement) => EdgeFlags | undefined;
 }
 
 interface ViewBox {
@@ -25,7 +44,10 @@ interface ViewBox {
 }
 
 /** Карта раскроя: SVG-визуализация реального результата с zoom/pan и выбором. */
-export function CuttingMap({ sheets, selectedPieceId, manual, onSelect, onMove }: Props) {
+export const CuttingMap = forwardRef<CuttingMapHandle, Props>(function CuttingMap(
+  { sheets, selectedPieceId, manual, showCuts = true, onSelect, onMove, grainOf, edgesOf },
+  ref,
+) {
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const layouts = useMemo<SheetLayout[]>(() => {
@@ -48,6 +70,20 @@ export function CuttingMap({ sheets, selectedPieceId, manual, onSelect, onMove }
   const [vb, setVb] = useState<ViewBox>(contentBox);
   useEffect(() => setVb(contentBox), [contentBox]);
 
+  // Императивный API масштаба.
+  useImperativeHandle(ref, () => ({
+    zoomIn: () => setVb((v) => zoomAroundCenter(v, 1 / 1.25)),
+    zoomOut: () => setVb((v) => zoomAroundCenter(v, 1.25)),
+    fit: () => setVb(contentBox),
+    reset100: () => {
+      // 100%: 1 мм = 1 px по текущему размеру viewport.
+      const svg = svgRef.current;
+      if (!svg) return;
+      const rect = svg.getBoundingClientRect();
+      setVb((v) => ({ x: v.x + v.w / 2 - rect.width / 2, y: v.y + v.h / 2 - rect.height / 2, w: rect.width, h: rect.height }));
+    },
+  }), [contentBox]);
+
   const toWorld = (clientX: number, clientY: number) => {
     const svg = svgRef.current!;
     const pt = svg.createSVGPoint();
@@ -59,20 +95,13 @@ export function CuttingMap({ sheets, selectedPieceId, manual, onSelect, onMove }
     return { x: w.x, y: w.y };
   };
 
-  // Zoom колесом вокруг курсора.
   const onWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const p = toWorld(e.clientX, e.clientY);
     const factor = e.deltaY > 0 ? 1.12 : 1 / 1.12;
-    setVb((v) => ({
-      x: p.x - (p.x - v.x) * factor,
-      y: p.y - (p.y - v.y) * factor,
-      w: v.w * factor,
-      h: v.h * factor,
-    }));
+    setVb((v) => ({ x: p.x - (p.x - v.x) * factor, y: p.y - (p.y - v.y) * factor, w: v.w * factor, h: v.h * factor }));
   };
 
-  // Панорамирование фона.
   const pan = useRef<{ x: number; y: number } | null>(null);
   const drag = useRef<{ pieceId: string; sheetIndex: number; length: number; width: number; dx: number; dy: number } | null>(null);
   const [ghost, setGhost] = useState<{ pieceId: string; x: number; y: number } | null>(null);
@@ -96,7 +125,6 @@ export function CuttingMap({ sheets, selectedPieceId, manual, onSelect, onMove }
     if (drag.current && ghost) {
       const d = drag.current;
       const layout = layouts[d.sheetIndex];
-      // ghost.x/y — левый-верх детали в мире; переводим в локальные координаты листа.
       const localX = ghost.x - layout.originX;
       const localY = layout.sheet.width - (ghost.y - layout.originY) - d.width;
       onMove(d.pieceId, d.sheetIndex, Math.round(localX), Math.round(localY));
@@ -131,6 +159,7 @@ export function CuttingMap({ sheets, selectedPieceId, manual, onSelect, onMove }
       {layouts.map((layout) => {
         const { sheet, originX, originY } = layout;
         const flipY = (y: number, h: number) => originY + (sheet.width - (y + h));
+        const sw = vb.w * 0.001;
         return (
           <g key={sheet.id}>
             <rect x={originX} y={originY} width={sheet.length} height={sheet.width} fill="#16171a" stroke="#5a6472" strokeWidth={vb.w * 0.0015} />
@@ -142,19 +171,39 @@ export function CuttingMap({ sheets, selectedPieceId, manual, onSelect, onMove }
               fill="none"
               stroke="#3a3d43"
               strokeDasharray={`${vb.w * 0.006} ${vb.w * 0.004}`}
-              strokeWidth={vb.w * 0.001}
+              strokeWidth={sw}
             />
             <text x={originX} y={originY - vb.w * 0.012} fill="#9aa0a6" fontSize={vb.w * 0.02}>
-              Лист {sheet.index + 1} · {Math.round(sheet.utilization * 100)}%
+              Лист {sheet.index + 1}{sheet.fromRemnant ? ' (остаток)' : ''} · {Math.round(sheet.utilization * 100)}%
             </text>
-            {sheet.remnants.map((r) => (
-              <rect key={r.id} x={originX + r.x} y={flipY(r.y, r.height)} width={r.width} height={r.height} fill="none" stroke="#4caf7d" strokeDasharray={`${vb.w * 0.004} ${vb.w * 0.004}`} strokeWidth={vb.w * 0.001} />
+
+            {/* Линии реза. */}
+            {showCuts && sheet.cuts.map((c) => (
+              <line
+                key={c.id}
+                x1={originX + c.x1}
+                y1={c.orientation === 'horizontal' ? flipY(c.y1, 0) : flipY(c.y1, 0)}
+                x2={originX + c.x2}
+                y2={c.orientation === 'horizontal' ? flipY(c.y2, 0) : flipY(c.y2, 0)}
+                stroke="#39506e"
+                strokeWidth={sw * 0.7}
+                strokeDasharray={`${vb.w * 0.008} ${vb.w * 0.005}`}
+              />
             ))}
+
+            {/* Остатки: полезные — зелёные, отход — серые. */}
+            {sheet.remnants.map((r) => (
+              <rect key={r.id} x={originX + r.x} y={flipY(r.y, r.height)} width={r.width} height={r.height} fill="none" stroke={r.usable ? '#4caf7d' : '#6b6f76'} strokeDasharray={`${vb.w * 0.004} ${vb.w * 0.004}`} strokeWidth={sw} />
+            ))}
+
+            {/* Детали. */}
             {sheet.placements.map((p) => {
               const wx = originX + p.x;
               const wy = flipY(p.y, p.width);
               const sel = p.pieceId === selectedPieceId;
               const gh = ghost?.pieceId === p.pieceId ? ghost : null;
+              const grain = grainOf?.(p) ?? 'none';
+              const edges = edgesOf?.(p);
               return (
                 <g
                   key={p.pieceId}
@@ -165,6 +214,12 @@ export function CuttingMap({ sheets, selectedPieceId, manual, onSelect, onMove }
                 >
                   <title>{`${p.number} ${p.name}\n${Math.round(p.length)} × ${Math.round(p.width)}${p.rotation ? ' (повёрнута)' : ''}`}</title>
                   <rect x={wx} y={wy} width={p.length} height={p.width} fill={sel ? '#37507a' : p.origin === 'manual' ? '#4a3b2a' : '#28303c'} stroke={sel ? '#4c8dff' : '#7f8ea3'} strokeWidth={vb.w * (sel ? 0.002 : 0.001)} />
+                  {/* Кромка (толстые линии по сторонам с кромкой). */}
+                  {edges && <EdgeLines x={wx} y={wy} w={p.length} h={p.width} edges={edges} sw={sw * 2.5} />}
+                  {/* Стрелка направления текстуры. */}
+                  {grain !== 'none' && (
+                    <GrainArrow x={wx} y={wy} w={p.length} h={p.width} grain={grain} rotation={p.rotation} />
+                  )}
                   <text x={wx + p.length / 2} y={wy + p.width / 2} fill="#e6e7e9" fontSize={Math.min(p.length, p.width) * 0.3} textAnchor="middle" dominantBaseline="middle" style={{ pointerEvents: 'none' }}>{p.number}</text>
                 </g>
               );
@@ -173,5 +228,45 @@ export function CuttingMap({ sheets, selectedPieceId, manual, onSelect, onMove }
         );
       })}
     </svg>
+  );
+});
+
+function zoomAroundCenter(v: ViewBox, factor: number): ViewBox {
+  const cx = v.x + v.w / 2;
+  const cy = v.y + v.h / 2;
+  return { x: cx - (v.w * factor) / 2, y: cy - (v.h * factor) / 2, w: v.w * factor, h: v.h * factor };
+}
+
+/** Толстые линии по сторонам детали, где есть кромка. */
+function EdgeLines({ x, y, w, h, edges, sw }: { x: number; y: number; w: number; h: number; edges: EdgeFlags; sw: number }) {
+  const c = '#e0a94c';
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      {edges.left && <line x1={x} y1={y} x2={x} y2={y + h} stroke={c} strokeWidth={sw} />}
+      {edges.right && <line x1={x + w} y1={y} x2={x + w} y2={y + h} stroke={c} strokeWidth={sw} />}
+      {edges.top && <line x1={x} y1={y} x2={x + w} y2={y} stroke={c} strokeWidth={sw} />}
+      {edges.bottom && <line x1={x} y1={y + h} x2={x + w} y2={y + h} stroke={c} strokeWidth={sw} />}
+    </g>
+  );
+}
+
+/** Стрелка направления волокна (→ вдоль длины листа, ↓ поперёк). */
+function GrainArrow({ x, y, w, h, grain, rotation }: { x: number; y: number; w: number; h: number; grain: GrainDirection; rotation: number }) {
+  // Грань «длины» детали идёт вдоль X, если деталь не повёрнута.
+  const alongX = (grain === 'length') !== (rotation === 90);
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const len = Math.min(w, h) * 0.3;
+  const p = alongX
+    ? { x1: cx - len, y1: cy, x2: cx + len, y2: cy }
+    : { x1: cx, y1: cy - len, x2: cx, y2: cy + len };
+  const head = alongX
+    ? `${p.x2},${p.y2} ${p.x2 - len * 0.3},${p.y2 - len * 0.25} ${p.x2 - len * 0.3},${p.y2 + len * 0.25}`
+    : `${p.x2},${p.y2} ${p.x2 - len * 0.25},${p.y2 - len * 0.3} ${p.x2 + len * 0.25},${p.y2 - len * 0.3}`;
+  return (
+    <g stroke="#8fa3c4" fill="#8fa3c4" strokeWidth={Math.min(w, h) * 0.02} style={{ pointerEvents: 'none' }}>
+      <line x1={p.x1} y1={p.y1} x2={p.x2} y2={p.y2} />
+      <polygon points={head} />
+    </g>
   );
 }

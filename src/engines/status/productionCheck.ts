@@ -6,6 +6,7 @@ import type { Project } from '@/core/model/types';
 import { validateProjectModel, type ProjectIssue } from './projectValidator';
 import { computeModuleStatuses, type ModuleStatus } from './moduleStatus';
 import { validateConnections } from './connectionCheck';
+import { validateCutting } from './cuttingCheck';
 
 export interface ProductionCheckResult {
   ready: boolean;
@@ -16,7 +17,7 @@ export interface ProductionCheckResult {
 export function runProductionCheck(project: Project, ctx: { cuttingRunning: boolean }): ProductionCheckResult {
   const validation = validateProjectModel(project);
   const statuses = computeModuleStatuses(project, ctx);
-  const issues = [...validation.issues, ...validateConnections(project)];
+  const issues = [...validation.issues, ...validateConnections(project), ...validateCutting(project)];
 
   // Устаревшие/незавершённые расчёты — предупреждения перед экспортом документов.
   for (const s of statuses) {

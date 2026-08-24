@@ -31,8 +31,12 @@ function buildSheetPage(project: Project, sheet: CuttingSheetResult, materialNam
     prims.push({ kind: 'text', x: S(p.x + p.length / 2), y: S(p.y + p.width / 2) + 2, text: p.number, size: Math.min(4, Math.max(2.4, S(Math.min(p.length, p.width)) * 0.15)), color: '#1a1b1e', anchor: 'middle', baseline: 'middle', bold: true });
     prims.push({ kind: 'text', x: S(p.x + p.length / 2), y: S(p.y + p.width / 2) - 3, text: `${Math.round(p.length)}×${Math.round(p.width)}${p.rotation ? ' ↻' : ''}`, size: 2.4, color: '#8a919b', anchor: 'middle', baseline: 'middle' });
   }
+  // Линии реза (из фактического расположения деталей и пропила).
+  for (const c of sheet.cuts) {
+    prims.push({ kind: 'line', x1: S(c.x1), y1: S(c.y1), x2: S(c.x2), y2: S(c.y2), color: '#b9c2cf', w: 0.2 });
+  }
   for (const r of sheet.remnants) {
-    prims.push({ kind: 'rect', x: S(r.x), y: S(r.y), w: S(r.width), h: S(r.height), stroke: '#4caf7d', sw: 0.4, fill: 'none', dash: '3 3' });
+    prims.push({ kind: 'rect', x: S(r.x), y: S(r.y), w: S(r.width), h: S(r.height), stroke: r.usable ? '#4caf7d' : '#b0b4ba', sw: 0.4, fill: 'none', dash: '3 3' });
   }
 
   const scene = finalizeScene(prims, 8);

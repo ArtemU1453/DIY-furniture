@@ -327,7 +327,7 @@ export interface Placement {
   locked: boolean;
 }
 
-/** Прямоугольный остаток листа (для будущего модуля склада). */
+/** Прямоугольный остаток листа. `usable` — годен по критериям полезного остатка. */
 export interface CuttingRemnant {
   id: string;
   sheetId: string;
@@ -336,6 +336,18 @@ export interface CuttingRemnant {
   y: Mm;
   width: Mm;
   height: Mm;
+  area: number; // мм²
+  usable: boolean;
+}
+
+/** Линия реза (гильотинная), вычисленная из расположения деталей и пропила. */
+export interface CutLine {
+  id: string;
+  orientation: 'horizontal' | 'vertical';
+  x1: Mm;
+  y1: Mm;
+  x2: Mm;
+  y2: Mm;
 }
 
 export interface CuttingSheetResult {
@@ -347,10 +359,14 @@ export interface CuttingSheetResult {
   trim: TrimSettings;
   placements: Placement[];
   remnants: CuttingRemnant[];
+  cuts: CutLine[];
   usableAreaMm2: number;
   usedAreaMm2: number;
   wasteAreaMm2: number;
   utilization: number;
+  /** Источник листа: формат из библиотеки или переиспользованный остаток. */
+  sheetMaterialId?: string;
+  fromRemnant?: boolean;
 }
 
 export interface CuttingStatistics {
@@ -364,13 +380,36 @@ export interface CuttingStatistics {
   utilization: number;
 }
 
-/** Результат раскроя одного материала («расчётный вариант»). */
+/** Причина, по которой деталь не размещена. */
+export interface UnplacedPiece {
+  pieceId: string;
+  partId: PartId;
+  name: string;
+  number: string;
+  length: Mm;
+  width: Mm;
+  reason: string;
+}
+
+/** Результат раскроя одного материала («оптимизированный вариант»). */
 export interface CuttingResult {
   materialId: MaterialId;
   sheets: CuttingSheetResult[];
-  unplaced: Array<{ pieceId: string; partId: PartId; name: string; number: string; length: Mm; width: Mm }>;
+  unplaced: UnplacedPiece[];
   statistics: CuttingStatistics;
   attemptsRun: number;
+  /** Предупреждения (нехватка материала, ограничения и т.п.). */
+  warnings: string[];
+}
+
+/** Режим оптимизации раскроя. */
+export type OptimizationMode = 'FAST' | 'BALANCED' | 'MAX_UTILIZATION';
+
+/** Критерии «полезного» остатка (не зашиты в код — настройки пользователя). */
+export interface UsableRemnantCriteria {
+  minWidth: Mm;
+  minLength: Mm;
+  minArea: number; // мм²
 }
 
 /** Настройки раскроя (сохраняются в проекте). */
@@ -378,11 +417,44 @@ export interface CuttingSettings {
   respectGrain: boolean;
   attempts: number;
   sortStrategy: string;
-  minRemnant: Mm;
+  minRemnant: Mm; // порог извлечения остатка (мин. сторона)
   trim: TrimSettings;
   kerfOverride?: Mm;
   sheetOverrides: Record<string, { length: Mm; width: Mm }>;
   locked: LockedPlacement[];
+  optimizationMode: OptimizationMode;
+  algorithm: string;
+  usableRemnant: UsableRemnantCriteria;
+  useRemnants: boolean;
+  /** Выбранный формат листа из библиотеки на материал (SheetMaterial.id). */
+  sheetSelection: Record<string, string>;
+}
+
+/** Формат листа в библиотеке (SheetLibrary). Ссылается на материал. */
+export interface SheetMaterial {
+  id: string;
+  materialId: MaterialId;
+  name: string;
+  width: Mm; // ширина листа (короткая сторона по умолчанию)
+  height: Mm; // длина листа
+  thickness: Mm;
+  grainDirection: GrainDirection;
+  availableQuantity: number; // ограниченный запас (0 = без ограничения)
+  source: 'library' | 'custom';
+  parameters?: Record<string, unknown>;
+}
+
+/** Сохранённый остаток (RemnantLibrary) — переиспользуемый в будущем раскрое. */
+export interface StoredRemnant {
+  id: string;
+  materialId: MaterialId;
+  thickness: Mm;
+  width: Mm;
+  height: Mm;
+  grainDirection: GrainDirection;
+  sourceSheetId: string;
+  createdAt: string; // ISO
+  note?: string;
 }
 
 /** Сохранённый результат раскроя + версия исходной модели (для инвалидации). */
@@ -445,6 +517,10 @@ export interface Project {
   hardwareConnections: HardwareConnection[];
   machining: MachiningState;
   cutting: CuttingState;
+  /** Библиотека форматов листов (SheetLibrary). */
+  sheets: SheetMaterial[];
+  /** Библиотека сохранённых остатков (RemnantLibrary). */
+  remnants: StoredRemnant[];
   documents: DocumentsState;
   furnitures: Furniture[];
   metadata?: Record<string, unknown>;

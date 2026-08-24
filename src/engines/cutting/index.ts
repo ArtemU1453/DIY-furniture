@@ -6,7 +6,9 @@ export { runCutting, DEFAULT_ENGINE_ID } from './run';
 export { buildCuttingInputs, buildPieceInstances, productionSignature, isCuttingStale } from './buildInput';
 export { validateResult, validateSheet, type CuttingIssue } from './validator';
 export { m2 } from './metrics';
-export { sheetToSvg, resultToSvg, reportToCsv } from './export';
+export { sheetToSvg, resultToSvg, reportToCsv, reportToJson } from './export';
+export { computeCutLines } from './cutlines';
+export { isUsableRemnant } from './remnants';
 export { SORT_STRATEGIES, getSortStrategy } from './sort';
 export {
   CuttingCancelledError,
@@ -15,15 +17,22 @@ export {
   type CuttingOptions,
   type CuttingRunControls,
   type CuttingProgress,
+  type RemnantSheet,
 } from './types';
 export type {
   CuttingResult,
   CuttingSheetResult,
   CuttingRemnant,
+  CutLine,
   CuttingStatistics,
   CuttingSettings,
   CuttingReport,
   CuttingState,
+  UnplacedPiece,
+  OptimizationMode,
+  UsableRemnantCriteria,
+  SheetMaterial,
+  StoredRemnant,
   Placement,
   LockedPlacement,
   TrimSettings,

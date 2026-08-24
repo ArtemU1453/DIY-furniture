@@ -31,7 +31,10 @@ import type {
   PartFace,
   Project,
   ProjectSettings,
+  SheetMaterial,
+  StoredRemnant,
 } from '@/core/model/types';
+import { newSheetMaterialId, newStoredRemnantId } from '@/core/model/ids';
 import { runCuttingInWorker, type CuttingHandle } from '@/workers/cuttingClient';
 import type { CuttingProgress } from '@/engines/cutting';
 import { documentsSignature } from '@/engines/drawing';
@@ -182,7 +185,18 @@ export interface EditorState {
   cancelCutting: () => void;
   setLockedPlacement: (placement: LockedPlacement) => void;
   clearLockedPlacements: () => void;
+  toggleLockedPlacement: (placement: LockedPlacement) => void;
+  rotatePlacement: (placement: LockedPlacement) => void;
   selectCuttingPiece: (pieceId: string | null) => void;
+  // Библиотека листов.
+  addSheetMaterial: (sheet: Omit<SheetMaterial, 'id'>) => string;
+  updateSheetMaterial: (id: string, patch: Partial<SheetMaterial>) => void;
+  removeSheetMaterial: (id: string) => void;
+  // Библиотека остатков.
+  saveRemnant: (remnant: Omit<StoredRemnant, 'id' | 'createdAt'>) => string;
+  saveUsableRemnantsFromResult: () => number;
+  removeRemnant: (id: string) => void;
+  clearRemnants: () => void;
 
   // ── Выбор ────────────────────────────────────────────────────────────────
   selectPart: (id: PartId | null) => void;
@@ -646,7 +660,83 @@ export const useEditorStore = create<EditorState>()(
           p.cutting.settings.locked = [];
         }),
 
+      // Переключить блокировку детали: закрепить на текущем месте или снять.
+      toggleLockedPlacement: (placement) =>
+        commit((p) => {
+          const existing = p.cutting.settings.locked.find((l) => l.pieceId === placement.pieceId);
+          if (existing) {
+            p.cutting.settings.locked = p.cutting.settings.locked.filter((l) => l.pieceId !== placement.pieceId);
+          } else {
+            p.cutting.settings.locked.push(placement);
+          }
+        }),
+
+      // Повернуть деталь на 90° (закрепляет её вручную с новым поворотом).
+      rotatePlacement: (placement) =>
+        commit((p) => {
+          const list = p.cutting.settings.locked.filter((l) => l.pieceId !== placement.pieceId);
+          list.push({ ...placement, rotation: placement.rotation === 90 ? 0 : 90 });
+          p.cutting.settings.locked = list;
+        }),
+
       selectCuttingPiece: (pieceId) => set((s) => void (s.selectedCuttingPieceId = pieceId)),
+
+      // ── Библиотека листов ────────────────────────────────────────────────
+      addSheetMaterial: (sheet) => {
+        const id = newSheetMaterialId();
+        commit((p) => void p.sheets.push({ ...sheet, id }));
+        return id;
+      },
+      updateSheetMaterial: (id, patch) =>
+        commit((p) => {
+          const s = p.sheets.find((x) => x.id === id);
+          if (s) Object.assign(s, patch);
+        }),
+      removeSheetMaterial: (id) =>
+        commit((p) => {
+          p.sheets = p.sheets.filter((s) => s.id !== id);
+          // Снять выбор формата, ссылавшийся на удалённый лист.
+          for (const [mat, sel] of Object.entries(p.cutting.settings.sheetSelection)) {
+            if (sel === id) delete p.cutting.settings.sheetSelection[mat];
+          }
+        }),
+
+      // ── Библиотека остатков ──────────────────────────────────────────────
+      saveRemnant: (remnant) => {
+        const id = newStoredRemnantId();
+        commit((p) => void p.remnants.push({ ...remnant, id, createdAt: new Date().toISOString() }));
+        return id;
+      },
+      // Сохранить все «полезные» остатки текущего результата раскроя в библиотеку.
+      saveUsableRemnantsFromResult: () => {
+        const project = get().project;
+        const report = project.cutting.report;
+        if (!report) return 0;
+        const thicknessByMat = new Map(project.materials.map((m) => [m.id, m.thickness]));
+        const grainByMat = new Map(project.materials.map((m) => [m.id, m.grain]));
+        const toAdd: StoredRemnant[] = [];
+        for (const job of report.jobs) {
+          for (const sheet of job.sheets) {
+            for (const r of sheet.remnants) {
+              if (!r.usable) continue;
+              toAdd.push({
+                id: newStoredRemnantId(),
+                materialId: r.materialId,
+                thickness: thicknessByMat.get(r.materialId) ?? 0,
+                width: r.width,
+                height: r.height,
+                grainDirection: grainByMat.get(r.materialId) ?? 'none',
+                sourceSheetId: r.sheetId,
+                createdAt: new Date().toISOString(),
+              });
+            }
+          }
+        }
+        if (toAdd.length > 0) commit((p) => void p.remnants.push(...toAdd));
+        return toAdd.length;
+      },
+      removeRemnant: (id) => commit((p) => void (p.remnants = p.remnants.filter((r) => r.id !== id))),
+      clearRemnants: () => commit((p) => void (p.remnants = [])),
 
       selectPart: (id) =>
         set((state) => {

@@ -9,3 +9,4 @@ export {
 } from './moduleStatus';
 export { runProductionCheck, type ProductionCheckResult } from './productionCheck';
 export { validateConnections } from './connectionCheck';
+export { validateCutting } from './cuttingCheck';
