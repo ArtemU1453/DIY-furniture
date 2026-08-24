@@ -12,17 +12,20 @@ import type {
   FurnitureId,
   HardwareConnectionId,
   HardwareId,
+  MachiningId,
   MaterialId,
   PartId,
 } from '@/core/model/ids';
-import { newHardwareConnectionId } from '@/core/model/ids';
+import { newHardwareConnectionId, newMachiningId } from '@/core/model/ids';
 import type {
   EdgeMaterial,
   Furniture,
   Hardware,
   HardwareConnection,
+  MachiningOperation,
   Material,
   Part,
+  PartFace,
   Project,
   ProjectSettings,
 } from '@/core/model/types';
@@ -67,6 +70,7 @@ export interface EditorState {
   selectedPartId: PartId | null;
   activeFurnitureId: FurnitureId | null;
   selectedConnectionId: HardwareConnectionId | null;
+  selectedOperationId: MachiningId | null;
   past: Project[];
   future: Project[];
 
@@ -115,6 +119,19 @@ export interface EditorState {
   }) => CreateConnectionResult;
   removeConnection: (id: HardwareConnectionId) => void;
   selectConnection: (id: HardwareConnectionId | null) => void;
+
+  // ── Присадка (ручные операции) ──────────────────────────────────────────────
+  addManualOperation: (input: {
+    partId: PartId;
+    face: PartFace;
+    x: number;
+    y: number;
+    diameter: number;
+    depth: number;
+    through?: boolean;
+  }) => MachiningId;
+  removeOperation: (id: MachiningId) => void;
+  selectOperation: (id: MachiningId | null) => void;
 
   // ── Выбор ────────────────────────────────────────────────────────────────
   selectPart: (id: PartId | null) => void;
@@ -165,6 +182,7 @@ export const useEditorStore = create<EditorState>()(
       selectedPartId: null,
       activeFurnitureId: null,
       selectedConnectionId: null,
+      selectedOperationId: null,
       past: [],
       future: [],
 
@@ -174,6 +192,7 @@ export const useEditorStore = create<EditorState>()(
           state.selectedPartId = null;
           state.activeFurnitureId = null;
           state.selectedConnectionId = null;
+          state.selectedOperationId = null;
           state.past = [];
           state.future = [];
         });
@@ -186,6 +205,7 @@ export const useEditorStore = create<EditorState>()(
           state.activeFurnitureId =
             project.furnitures.find((f) => f.type === 'cabinet')?.id ?? null;
           state.selectedConnectionId = null;
+          state.selectedOperationId = null;
           state.past = [];
           state.future = [];
         });
@@ -360,6 +380,43 @@ export const useEditorStore = create<EditorState>()(
       },
 
       selectConnection: (id) => set((s) => void (s.selectedConnectionId = id)),
+
+      addManualOperation: (input) => {
+        const op: MachiningOperation = {
+          id: newMachiningId(),
+          type: 'drilling',
+          partId: input.partId,
+          face: input.face,
+          x: input.x,
+          y: input.y,
+          z: 0,
+          diameter: input.diameter,
+          depth: input.depth,
+          through: input.through ?? false,
+          origin: 'manual',
+        };
+        commit((p) => {
+          const part = findPart(p, input.partId);
+          if (part) part.machining.push(op);
+        });
+        return op.id;
+      },
+
+      removeOperation: (id) => {
+        // Удаляются только ручные операции (производные вычисляются из связей).
+        commit((p) => {
+          for (const f of p.furnitures) {
+            for (const a of f.assemblies) {
+              for (const part of a.parts) {
+                part.machining = part.machining.filter((op) => op.id !== id);
+              }
+            }
+          }
+        });
+        if (get().selectedOperationId === id) set((s) => void (s.selectedOperationId = null));
+      },
+
+      selectOperation: (id) => set((s) => void (s.selectedOperationId = id)),
 
       selectPart: (id) =>
         set((state) => {

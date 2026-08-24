@@ -46,11 +46,12 @@ export function rebuildCabinet(
     const key = keyOf(generated)!;
     const prev = byKey.get(key);
     if (prev) {
-      // Сохраняем стабильные поля предыдущей детали.
+      // Сохраняем стабильные поля предыдущей детали: id, кромку, ручную присадку.
       return {
         ...generated,
         id: prev.id,
         edges: prev.edges,
+        machining: prev.machining, // ручные операции (MANUAL) переживают пересчёт
         metadata: { ...generated.metadata, number: prev.metadata?.number ?? generated.metadata?.number },
       };
     }

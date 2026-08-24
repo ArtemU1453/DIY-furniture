@@ -6,6 +6,7 @@
  * структуры; несовместимые версии отклоняются с понятной ошибкой.
  */
 import { PROJECT_FORMAT_VERSION, type Project } from '@/core/model/types';
+import { DEFAULT_MACHINING_CONSTRAINTS } from '@/core/model/factory';
 
 export const PROJECT_FILE_EXTENSION = '.furniture.json';
 
@@ -47,8 +48,11 @@ export function deserializeProject(json: string): Project {
   assertProjectShape(parsed);
 
   const project = parsed as Project;
-  // Обратная совместимость: связи фурнитуры появились позже.
+  // Обратная совместимость: поля, появившиеся позже базовой версии 1.0.
   if (!Array.isArray(project.hardwareConnections)) project.hardwareConnections = [];
+  if (!project.machining || typeof project.machining !== 'object') {
+    project.machining = { constraints: { ...DEFAULT_MACHINING_CONSTRAINTS } };
+  }
   const major = project.version.split('.')[0];
   const currentMajor = PROJECT_FORMAT_VERSION.split('.')[0];
   if (major !== currentMajor) {

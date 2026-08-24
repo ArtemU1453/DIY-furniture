@@ -19,6 +19,7 @@ import {
   type EdgeMaterial,
   type Furniture,
   type Hardware,
+  type MachiningConstraints,
   type Material,
   type MaterialKind,
   type Part,
@@ -34,6 +35,14 @@ export const DEFAULT_SETTINGS: ProjectSettings = {
   sheetTrim: 10,
   costEnabled: false,
   locale: 'ru',
+};
+
+export const DEFAULT_MACHINING_CONSTRAINTS: MachiningConstraints = {
+  minDiameter: 2,
+  maxDepthRatio: 1, // глухое отверстие не глубже толщины детали
+  minEdgeOffset: 8,
+  minHoleSpacing: 16,
+  allowedFaces: ['top', 'bottom', 'front', 'back', 'left', 'right'],
 };
 
 /** Встроенный минимальный каталог материалов (ЛДСП). */
@@ -243,6 +252,7 @@ export function createProject(input: CreateProjectInput = {}): Project {
     edges,
     hardware: createDefaultHardware(),
     hardwareConnections: [],
+    machining: { constraints: { ...DEFAULT_MACHINING_CONSTRAINTS } },
     furnitures: [furniture],
   };
 }

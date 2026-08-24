@@ -10,16 +10,18 @@ import { CreateFurnitureDialog } from '@/components/panels/CreateFurnitureDialog
 import { PartsTable } from '@/components/panels/PartsTable';
 import { MaterialsView } from '@/components/panels/MaterialsView';
 import { HardwareView } from '@/components/panels/HardwareView';
+import { MachiningView } from '@/components/panels/MachiningView';
 import { Scene3D } from '@/features/designer/Scene3D';
 import { createAutosaver } from '@/storage/backup/autosave';
 
-type CenterView = '3d' | 'table' | 'materials' | 'hardware';
+type CenterView = '3d' | 'table' | 'materials' | 'hardware' | 'machining';
 
 export function App() {
   const [status, setStatus] = useState('');
   const [section, setSection] = useState<NavSection>('parts');
   const [centerView, setCenterView] = useState<CenterView>('3d');
   const [showNumbers, setShowNumbers] = useState(false);
+  const [showMachining, setShowMachining] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -88,6 +90,7 @@ export function App() {
               ['table', 'Детали'],
               ['materials', 'Материалы'],
               ['hardware', 'Фурнитура'],
+              ['machining', 'Присадка'],
             ] as Array<[CenterView, string]>
           ).map(([v, label]) => (
             <button key={v} className={centerView === v ? 'active' : ''} onClick={() => setCenterView(v)}>
@@ -95,17 +98,24 @@ export function App() {
             </button>
           ))}
           {centerView === '3d' && (
-            <label className="num-toggle">
-              <input type="checkbox" checked={showNumbers} onChange={(e) => setShowNumbers(e.target.checked)} />
-              № деталей
-            </label>
+            <>
+              <label className="num-toggle">
+                <input type="checkbox" checked={showNumbers} onChange={(e) => setShowNumbers(e.target.checked)} />
+                № деталей
+              </label>
+              <label className="num-toggle" style={{ marginLeft: 12 }}>
+                <input type="checkbox" checked={showMachining} onChange={(e) => setShowMachining(e.target.checked)} />
+                Присадка
+              </label>
+            </>
           )}
         </div>
         <div className="center-body">
-          {centerView === '3d' && <Scene3D showNumbers={showNumbers} />}
+          {centerView === '3d' && <Scene3D showNumbers={showNumbers} showMachining={showMachining} />}
           {centerView === 'table' && <PartsTable />}
           {centerView === 'materials' && <MaterialsView />}
           {centerView === 'hardware' && <HardwareView />}
+          {centerView === 'machining' && <MachiningView />}
         </div>
       </div>
       <RightPanel />
