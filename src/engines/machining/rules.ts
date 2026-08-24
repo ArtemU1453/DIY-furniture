@@ -17,6 +17,7 @@ import type {
 import type { HardwareCategory } from '@/core/model/types';
 import type { MachiningId } from '@/core/model/ids';
 import { analyzeJoint, type JointSidePlan } from './joint';
+import { faceInfo, partFrame } from '@/core/geometry/coordinateSystem';
 
 export interface RuleInput {
   connection: HardwareConnection;
@@ -90,7 +91,7 @@ export const dowelRule: MachiningRule = {
     const p = hardware.parameters ?? {};
     const diameter = num(p.diameter, 8);
     const length = num(p.length, 30);
-    const count = num(connection.parameters?.count, num(p.count, 2));
+    const count = resolveCount(connection, hardware, num(p.count, 2));
     const edgeOffset = num(connection.parameters?.edgeOffset, num(p.edgeOffset, 50));
 
     const joint = analyzeJoint(partA, partB, { count, edgeOffset });
@@ -114,7 +115,7 @@ export const confirmatRule: MachiningRule = {
     const diameter = num(p.diameter, 7);
     const length = num(p.length, 50);
     const pilotDiameter = num(p.pilotDiameter, 5);
-    const count = num(connection.parameters?.count, num(p.count, 2));
+    const count = resolveCount(connection, hardware, num(p.count, 2));
     const edgeOffset = num(connection.parameters?.edgeOffset, num(p.edgeOffset, 32));
 
     const joint = analyzeJoint(partA, partB, { count, edgeOffset });
@@ -126,6 +127,166 @@ export const confirmatRule: MachiningRule = {
       ...planHoles(joint.through, connection.id, 'through', 'confirmat', diameter, joint.through.thickness, true),
       ...planHoles(joint.receiving, connection.id, 'recv', 'confirmat', pilotDiameter, depthReceiving, false),
     ];
+  },
+};
+
+// ── Общие помощники расположения на грани одной детали ────────────────────────
+const resolveCount = (c: HardwareConnection, h: Hardware, fallback: number): number =>
+  num(c.quantity, num(c.parameters?.count, num(h.parameters?.count, fallback)));
+
+/** Равномерно распределить `count` точек вдоль размера с отступом от краёв. */
+function distribute(size: number, count: number, edgeOffset: number): number[] {
+  const clampOff = Math.min(edgeOffset, size / (count + 1));
+  if (count <= 1) return [size / 2];
+  const usable = size - 2 * clampOff;
+  return Array.from({ length: count }, (_, i) => clampOff + usable * (i / (count - 1)));
+}
+
+/** Отверстия на конкретной грани одной детали. */
+function faceHoles(
+  part: Part,
+  face: PartFace,
+  connectionId: string,
+  role: string,
+  type: MachiningType,
+  holes: Array<{ x: number; y: number }>,
+  diameter: number,
+  depth: number,
+  through: boolean,
+): MachiningOperation[] {
+  return holes.map((hpt, i) => makeOp({ type, partId: part.id, face, x: hpt.x, y: hpt.y, diameter, depth, through }, connectionId, `${role}:${i}`));
+}
+
+// ── Минификс / эксцентрик ─────────────────────────────────────────────────────
+export const minifixRule: MachiningRule = {
+  category: 'minifix',
+  build({ connection, hardware, partA, partB }) {
+    const p = hardware.parameters ?? {};
+    const count = resolveCount(connection, hardware, 2);
+    const edgeOffset = num(connection.parameters?.edgeOffset, num(p.edgeOffset, 32));
+    const joint = analyzeJoint(partA, partB, { count, edgeOffset });
+    if (!joint) return [];
+    const camD = num(p.camDiameter, 15);
+    const camDepth = Math.min(num(p.camDepth, joint.through.thickness / 2 + 1), joint.through.thickness - 1);
+    const rodD = num(p.rodDiameter, 8);
+    const rodDepth = num(p.rodDepth, 34);
+    // Корпус эксцентрика (глухая присадка) в пласть проходной детали + шток в торец.
+    return [
+      ...planHoles(joint.through, connection.id, 'cam', 'boring', camD, camDepth, false),
+      ...planHoles(joint.receiving, connection.id, 'rod', 'dowel', rodD, rodDepth, false),
+    ];
+  },
+};
+
+// ── Саморез ───────────────────────────────────────────────────────────────────
+export const screwRule: MachiningRule = {
+  category: 'screw',
+  build({ connection, hardware, partA, partB }) {
+    const p = hardware.parameters ?? {};
+    const count = resolveCount(connection, hardware, 3);
+    const edgeOffset = num(connection.parameters?.edgeOffset, num(p.edgeOffset, 40));
+    const joint = analyzeJoint(partA, partB, { count, edgeOffset });
+    if (!joint) return [];
+    const clearance = num(p.diameter, 4) + 1;
+    const pilot = num(p.pilotDiameter, num(p.diameter, 4) - 1.5);
+    const length = num(p.length, 30);
+    return [
+      ...planHoles(joint.through, connection.id, 'clear', 'drilling', clearance, joint.through.thickness, true),
+      ...planHoles(joint.receiving, connection.id, 'pilot', 'drilling', pilot, Math.max(1, length - joint.through.thickness), false),
+    ];
+  },
+};
+
+// ── Уголок (bracket) ──────────────────────────────────────────────────────────
+export const cornerRule: MachiningRule = {
+  category: 'corner',
+  build({ connection, hardware, partA, partB }) {
+    const p = hardware.parameters ?? {};
+    const count = resolveCount(connection, hardware, 1);
+    const edgeOffset = num(connection.parameters?.edgeOffset, num(p.edgeOffset, 30));
+    const joint = analyzeJoint(partA, partB, { count, edgeOffset });
+    if (!joint) return [];
+    const d = num(p.diameter, 4);
+    return [
+      ...planHoles(joint.through, connection.id, 'a', 'drilling', d, Math.max(1, joint.through.thickness / 2), false),
+      ...planHoles(joint.receiving, connection.id, 'b', 'drilling', d, Math.max(1, joint.receiving.thickness / 2), false),
+    ];
+  },
+};
+
+// ── Петля ─────────────────────────────────────────────────────────────────────
+export const hingeRule: MachiningRule = {
+  category: 'hinge',
+  build({ connection, hardware, partA, partB }) {
+    const p = hardware.parameters ?? {};
+    const count = resolveCount(connection, hardware, 2);
+    const cupD = num(p.cupDiameter, 35);
+    const cupDepth = Math.min(num(p.cupDepth, 12.5), Math.max(1, partA.thickness - 1));
+    const cupOffset = num(p.cupEdgeOffset, 22.5);
+    const screwD = num(p.screwDiameter, 2.5);
+    const facEdge = num(p.edgeOffset, 90);
+    // Чашка петли на фасаде (partA), тыльная грань.
+    const facFace = faceInfo(partFrame(partA), 'back');
+    const ys = distribute(facFace.vSize, count, facEdge);
+    const cups = faceHoles(partA, 'back', connection.id, 'cup', 'hinge', ys.map((y) => ({ x: Math.min(cupOffset, facFace.uSize - 5), y })), cupD, cupDepth, false);
+    const facScrews = ys.flatMap((y, i) =>
+      [-1, 1].map((s, j) => makeOp({ type: 'drilling', partId: partA.id, face: 'back', x: Math.min(cupOffset, facFace.uSize - 5), y: y + s * 24, diameter: screwD, depth: 8, through: false }, connection.id, `fscrew:${i}:${j}`)),
+    );
+    // Ответная планка на боковине (partB).
+    const sideFace = faceInfo(partFrame(partB), 'front');
+    const sideYs = distribute(sideFace.vSize, count, facEdge);
+    const sideScrews = faceHoles(partB, 'front', connection.id, 'sscrew', 'drilling', sideYs.map((y) => ({ x: Math.min(37, sideFace.uSize - 5), y })), screwD, 8, false);
+    return [...cups, ...facScrews, ...sideScrews];
+  },
+};
+
+// ── Ручка ─────────────────────────────────────────────────────────────────────
+export const handleRule: MachiningRule = {
+  category: 'handle',
+  build({ connection, hardware, partA }) {
+    const p = hardware.parameters ?? {};
+    const cd = num(p.centerDistance, 96);
+    const holeD = num(p.diameter, 5);
+    const fi = faceInfo(partFrame(partA), 'front');
+    const cx = fi.uSize / 2;
+    const y = Math.min(num(p.edgeOffset, 40), fi.vSize - 10);
+    return [
+      makeOp({ type: 'drilling', partId: partA.id, face: 'front', x: Math.max(2, cx - cd / 2), y, diameter: holeD, depth: partA.thickness, through: true }, connection.id, 'h:0'),
+      makeOp({ type: 'drilling', partId: partA.id, face: 'front', x: Math.min(fi.uSize - 2, cx + cd / 2), y, diameter: holeD, depth: partA.thickness, through: true }, connection.id, 'h:1'),
+    ];
+  },
+};
+
+// ── Опора (ножка) ─────────────────────────────────────────────────────────────
+export const legRule: MachiningRule = {
+  category: 'leg',
+  build({ connection, hardware, partA }) {
+    const p = hardware.parameters ?? {};
+    const inset = num(p.edgeOffset, 50);
+    const d = num(p.diameter, 8);
+    const depth = Math.min(num(p.depth, 12), Math.max(1, partA.thickness - 2));
+    const fi = faceInfo(partFrame(partA), 'bottom');
+    const xs = [inset, Math.max(inset, fi.uSize - inset)];
+    const ys = [inset, Math.max(inset, fi.vSize - inset)];
+    const holes = xs.flatMap((x) => ys.map((y) => ({ x, y })));
+    return faceHoles(partA, 'bottom', connection.id, 'leg', 'drilling', holes, d, depth, false);
+  },
+};
+
+// ── Направляющая ящика ────────────────────────────────────────────────────────
+export const slideRule: MachiningRule = {
+  category: 'slide',
+  build({ connection, hardware, partA, partB }) {
+    const p = hardware.parameters ?? {};
+    const count = resolveCount(connection, hardware, 3);
+    const d = num(p.diameter, 4);
+    const faceA = faceInfo(partFrame(partA), 'front');
+    const yA = Math.min(num(p.position, 100), faceA.vSize - 10);
+    const rowA = faceHoles(partA, 'front', connection.id, 'sa', 'drilling', distribute(faceA.uSize, count, num(p.edgeOffset, 30)).map((x) => ({ x, y: yA })), d, 8, false);
+    const faceB = faceInfo(partFrame(partB), 'front');
+    const yB = Math.min(num(p.position, 100), faceB.vSize - 10);
+    const rowB = faceHoles(partB, 'front', connection.id, 'sb', 'drilling', distribute(faceB.uSize, count, num(p.edgeOffset, 30)).map((x) => ({ x, y: yB })), d, 8, false);
+    return [...rowA, ...rowB];
   },
 };
 
@@ -141,3 +302,10 @@ export function getMachiningRule(category: HardwareCategory): MachiningRule | un
 
 registerMachiningRule(dowelRule);
 registerMachiningRule(confirmatRule);
+registerMachiningRule(minifixRule);
+registerMachiningRule(screwRule);
+registerMachiningRule(cornerRule);
+registerMachiningRule(hingeRule);
+registerMachiningRule(handleRule);
+registerMachiningRule(legRule);
+registerMachiningRule(slideRule);

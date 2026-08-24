@@ -8,3 +8,4 @@ export {
   type ModuleState,
 } from './moduleStatus';
 export { runProductionCheck, type ProductionCheckResult } from './productionCheck';
+export { validateConnections } from './connectionCheck';

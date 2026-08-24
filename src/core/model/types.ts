@@ -148,14 +148,16 @@ export interface MachiningState {
 
 export type HardwareCategory =
   | 'confirmat' // конфирмат
-  | 'minifix' // эксцентрик
+  | 'minifix' // эксцентрик / минификс
   | 'dowel' // шкант
   | 'shelf-support' // полкодержатель
   | 'hinge' // петля
   | 'slide' // направляющая
   | 'connector' // стяжка
-  | 'corner' // уголок
+  | 'corner' // уголок / bracket
   | 'screw' // саморез
+  | 'leg' // опора
+  | 'handle' // ручка
   | 'other';
 
 /** Единица фурнитуры (крепёж/навес). Количество НЕ хранится — оно
@@ -165,6 +167,7 @@ export interface Hardware {
   name: string;
   category: HardwareCategory;
   manufacturer?: string;
+  article?: string;
   model?: string;
   /** Параметры крепежа: diameter, length, headDiameter и т.п. */
   parameters?: Record<string, number | string | boolean>;
@@ -172,15 +175,27 @@ export interface Hardware {
   metadata?: Record<string, unknown>;
 }
 
+/** Тип конструктивного узла (Joint). */
+export type JointType =
+  | 'BUTT'
+  | 'EDGE_TO_FACE'
+  | 'FACE_TO_FACE'
+  | 'CORNER'
+  | 'PANEL_TO_PANEL'
+  | 'PANEL_TO_FRAME';
+
 /**
- * Семантическая связь: крепёж соединяет детали. НЕ содержит отверстий/координат
- * — реальные технологические операции строит MachiningEngine на следующем этапе.
+ * Семантическая связь (конструктивный узел): крепёж соединяет детали. НЕ
+ * содержит отверстий/координат — реальные технологические операции строит
+ * MachiningEngine (производные, привязаны к связи через sourceHardwareConnectionId).
  */
 export interface HardwareConnection {
   id: HardwareConnectionId;
   hardwareId: HardwareId;
   partAId: PartId;
   partBId: PartId;
+  jointType?: JointType;
+  quantity?: number; // число крепежа в узле (переопределяет parameters.count)
   parameters?: Record<string, number | string | boolean>;
   metadata?: Record<string, unknown>;
 }

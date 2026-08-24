@@ -12,6 +12,7 @@ export function ConnectionDialog({ onClose }: { onClose: () => void }) {
   const [hardwareId, setHardwareId] = useState<HardwareId | ''>(project.hardware[0]?.id ?? '');
   const [partAId, setPartAId] = useState<PartId | ''>('');
   const [partBId, setPartBId] = useState<PartId | ''>('');
+  const [quantity, setQuantity] = useState(2);
   const [error, setError] = useState('');
 
   const partLabel = (id: string) => {
@@ -24,7 +25,7 @@ export function ConnectionDialog({ onClose }: { onClose: () => void }) {
       setError('Выберите фурнитуру и обе детали.');
       return;
     }
-    const res = addConnection({ hardwareId, partAId, partBId });
+    const res = addConnection({ hardwareId, partAId, partBId, quantity: Math.max(1, quantity) });
     if (!res.ok) setError(res.message ?? 'Не удалось создать соединение.');
     else onClose();
   };
@@ -57,6 +58,11 @@ export function ConnectionDialog({ onClose }: { onClose: () => void }) {
             <option key={p.id} value={p.id}>{partLabel(p.id)}</option>
           ))}
         </select>
+      </div>
+
+      <div className="field">
+        <label>Количество крепежа</label>
+        <input type="number" min={1} value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value, 10) || 1)} />
       </div>
 
       {error && <div className="issue error">{error}</div>}

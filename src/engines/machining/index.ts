@@ -22,4 +22,4 @@ export {
   type MachiningRule,
   type RuleInput,
 } from './rules';
-export { analyzeJoint, type JointAnalysis } from './joint';
+export { analyzeJoint, inferJointType, type JointAnalysis } from './joint';

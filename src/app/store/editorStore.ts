@@ -35,6 +35,8 @@ import type {
 import { runCuttingInWorker, type CuttingHandle } from '@/workers/cuttingClient';
 import type { CuttingProgress } from '@/engines/cutting';
 import { documentsSignature } from '@/engines/drawing';
+import { inferJointType } from '@/engines/machining';
+import { hardwareFromTemplate, type HardwareTemplate } from '@/core/model/hardwareCatalog';
 import { createAssembly, createFurniture, createPart, createProject } from '@/core/model/factory';
 import {
   findAssemblyOfPart,
@@ -152,10 +154,14 @@ export interface EditorState {
     hardwareId: HardwareId;
     partAId: PartId;
     partBId: PartId;
+    quantity?: number;
     parameters?: HardwareConnection['parameters'];
   }) => CreateConnectionResult;
+  updateConnection: (id: HardwareConnectionId, patch: Partial<HardwareConnection>) => void;
+  duplicateConnection: (id: HardwareConnectionId) => HardwareConnectionId | null;
   removeConnection: (id: HardwareConnectionId) => void;
   selectConnection: (id: HardwareConnectionId | null) => void;
+  addHardwareFromTemplate: (template: HardwareTemplate) => HardwareId;
 
   // ── Присадка (ручные операции) ──────────────────────────────────────────────
   addManualOperation: (input: {
@@ -494,27 +500,58 @@ export const useEditorStore = create<EditorState>()(
       },
 
       addConnection: (input) => {
-        const issues = validateConnection(input, get().project);
+        const project = get().project;
+        const issues = validateConnection(input, project);
         if (issues.length > 0) {
           return { ok: false, message: issues[0].message };
         }
+        const partA = findPart(project, input.partAId);
+        const partB = findPart(project, input.partBId);
         const connection: HardwareConnection = {
           id: newHardwareConnectionId(),
           hardwareId: input.hardwareId,
           partAId: input.partAId,
           partBId: input.partBId,
+          jointType: partA && partB ? inferJointType(partA, partB) : undefined,
+          quantity: input.quantity,
           parameters: input.parameters,
         };
         commit((p) => void p.hardwareConnections.push(connection));
         return { ok: true, id: connection.id };
       },
 
+      updateConnection: (id, patch) =>
+        commit((p) => {
+          const c = p.hardwareConnections.find((x) => x.id === id);
+          if (c) Object.assign(c, patch);
+        }),
+
+      duplicateConnection: (id) => {
+        const src = get().project.hardwareConnections.find((c) => c.id === id);
+        if (!src) return null;
+        // Новый HCxxx; производные операции (Mxxx) регенерируются от нового id.
+        const copy: HardwareConnection = {
+          ...structuredClone(src),
+          id: newHardwareConnectionId(),
+        };
+        commit((p) => void p.hardwareConnections.push(copy));
+        return copy.id;
+      },
+
       removeConnection: (id) => {
+        // Удаляем связь; производные операции присадки исчезают вместе с ней
+        // (они вычисляются из связей — «висячих» операций не остаётся).
         commit((p) => void (p.hardwareConnections = p.hardwareConnections.filter((c) => c.id !== id)));
         if (get().selectedConnectionId === id) set((s) => void (s.selectedConnectionId = null));
       },
 
       selectConnection: (id) => set((s) => void (s.selectedConnectionId = id)),
+
+      addHardwareFromTemplate: (template) => {
+        const hardware = hardwareFromTemplate(template);
+        commit((p) => void p.hardware.push(hardware));
+        return hardware.id;
+      },
 
       addManualOperation: (input) => {
         const op: MachiningOperation = {

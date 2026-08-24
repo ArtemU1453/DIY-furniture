@@ -29,6 +29,8 @@ export function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
   const [showNumbers, setShowNumbers] = useState(false);
   const [showMachining, setShowMachining] = useState(false);
+  const [showHardware, setShowHardware] = useState(true);
+  const [bodyMode, setBodyMode] = useState<'construction' | 'body'>('construction');
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -131,6 +133,16 @@ export function App() {
                 <input type="checkbox" checked={showMachining} onChange={(e) => setShowMachining(e.target.checked)} />
                 Присадка
               </label>
+              <label className="num-toggle" style={{ marginLeft: 12 }}>
+                <input type="checkbox" checked={showHardware} onChange={(e) => setShowHardware(e.target.checked)} />
+                Показать фурнитуру
+              </label>
+              <span className="sep" style={{ margin: '0 6px' }} />
+              {(['construction', 'body'] as const).map((m) => (
+                <button key={m} className={bodyMode === m ? 'active' : ''} onClick={() => setBodyMode(m)}>
+                  {m === 'construction' ? 'Конструкция' : 'Корпус'}
+                </button>
+              ))}
             </>
           )}
         </div>
@@ -144,7 +156,7 @@ export function App() {
               )}
               {(viewMode === '3d' || viewMode === 'split') && (
                 <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-                  <Scene3D showNumbers={showNumbers} showMachining={showMachining} />
+                  <Scene3D showNumbers={showNumbers} showMachining={showMachining} showHardware={showHardware} bodyMode={bodyMode} />
                 </div>
               )}
             </div>

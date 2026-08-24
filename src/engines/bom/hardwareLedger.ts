@@ -17,7 +17,9 @@ export function buildHardwareLedger(
 ): HardwareLedgerRow[] {
   const counts = new Map<HardwareId, number>();
   for (const c of connections) {
-    counts.set(c.hardwareId, (counts.get(c.hardwareId) ?? 0) + 1);
+    // Кол-во крепежа в связи = quantity (или 1). Спецификация группирует по крепежу.
+    const qty = typeof c.quantity === 'number' && c.quantity > 0 ? c.quantity : 1;
+    counts.set(c.hardwareId, (counts.get(c.hardwareId) ?? 0) + qty);
   }
   return hardware.map((h) => ({
     hardwareId: h.id,
