@@ -19,6 +19,10 @@ export function PropertiesPanel() {
   const edges = useEditorStore((s) => s.project.edges);
   const updatePart = useEditorStore((s) => s.updatePart);
   const removePart = useEditorStore((s) => s.removePart);
+  const duplicatePart = useEditorStore((s) => s.duplicatePart);
+  const setPartFlag = useEditorStore((s) => s.setPartFlag);
+  const selectPart = useEditorStore((s) => s.selectPart);
+  const requestFocus = useEditorStore((s) => s.requestFocus);
 
   if (!part) {
     return (
@@ -34,7 +38,12 @@ export function PropertiesPanel() {
   return (
     <>
       <div className="panel-section">
-        <h3>Деталь</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <h3>Деталь</h3>
+          <span className="dim" style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {(part.metadata?.number as string) || part.id.slice(0, 6)}
+          </span>
+        </div>
         <TextField label="Название" value={part.name} onCommit={(v) => updatePart(part.id, { name: v })} />
         <div className="field-row">
           <NumberField
@@ -125,7 +134,26 @@ export function PropertiesPanel() {
       </div>
 
       <div className="panel-section">
-        <button style={{ width: '100%' }} onClick={() => removePart(part.id)}>
+        <h3>Действия</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+          <button onClick={() => { const id = duplicatePart(part.id); if (id) selectPart(id); }}>Дублировать</button>
+          <button onClick={requestFocus}>Показать</button>
+          <button onClick={() => setPartFlag(part.id, { hidden: !(part.metadata?.hidden === true) })}>
+            {part.metadata?.hidden ? 'Показать деталь' : 'Скрыть'}
+          </button>
+          <button onClick={() => setPartFlag(part.id, { locked: !(part.metadata?.locked === true) })}>
+            {part.metadata?.locked ? 'Разблокировать' : 'Заблокировать'}
+          </button>
+        </div>
+        <button
+          style={{ width: '100%', marginTop: 8, color: 'var(--danger)' }}
+          onClick={() => {
+            const hasData = part.machining.length > 0;
+            if (!hasData || window.confirm(`Удалить «${part.name}»? Связанные операции присадки будут удалены.`)) {
+              removePart(part.id);
+            }
+          }}
+        >
           Удалить деталь
         </button>
       </div>

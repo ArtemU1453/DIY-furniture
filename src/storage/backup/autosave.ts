@@ -11,7 +11,13 @@ export interface Autosaver {
   cancel(): void;
 }
 
-export function createAutosaver(delayMs = 800): Autosaver {
+export interface AutosaverOptions {
+  delayMs?: number;
+  onStatus?: (status: 'saving' | 'saved') => void;
+}
+
+export function createAutosaver(options: AutosaverOptions = {}): Autosaver {
+  const delayMs = options.delayMs ?? 800;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let pending: Project | null = null;
 
@@ -20,7 +26,9 @@ export function createAutosaver(delayMs = 800): Autosaver {
     if (!pending) return;
     const project = pending;
     pending = null;
+    options.onStatus?.('saving');
     await saveProject(project);
+    options.onStatus?.('saved');
   };
 
   return {

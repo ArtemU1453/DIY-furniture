@@ -60,5 +60,7 @@ export function rebuildCabinet(
     return withNumber(generated, maxNumber);
   });
 
-  return { parts, sections: built.sections };
+  // Вручную добавленные детали (без ключа генератора) переживают пересчёт.
+  const manualParts = existing.filter((p) => !keyOf(p));
+  return { parts: [...parts, ...manualParts], sections: built.sections };
 }
