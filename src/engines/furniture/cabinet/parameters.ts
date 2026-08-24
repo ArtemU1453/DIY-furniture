@@ -12,6 +12,10 @@ export type TopMount = 'between' | 'overlay'; // между боковинами
 export type BottomMount = 'between' | 'under'; // между боковинами | под боковинами
 /** Тип задней стенки. */
 export type BackType = 'none' | 'overlay' | 'inset' | 'groove';
+/** Тип соединения корпуса. */
+export type JointType = 'confirmat' | 'dowel' | 'minifix';
+/** Тип открывания фасада. */
+export type DoorOpening = 'left' | 'right' | 'double';
 
 /** Параметры зазоров/отступов конструкции (не зашиваются в формулы). */
 export interface ConstructionSettings {
@@ -47,6 +51,15 @@ export interface CabinetParameters {
   shelves: number; // полок на секцию
   dividers: number; // вертикальных перегородок
   construction: ConstructionSettings;
+  // ── Фасады и соединения (этап 12) ──────────────────────────────────────────
+  doors: number; // количество фасадов (0 — без фасадов)
+  doorGap: number; // зазор между фасадами
+  doorOpening: DoorOpening;
+  handleEnabled: boolean;
+  jointType: JointType; // тип корпусного соединения
+  frontMaterial: MaterialId | null; // материал фасадов
+  /** Полка-щит: единственная деталь (шаблон «Полка»). */
+  boardOnly: boolean;
 }
 
 export interface CabinetDefaultsInput {
@@ -68,6 +81,13 @@ export function defaultCabinetParameters(input: CabinetDefaultsInput = {}): Cabi
     shelves: 3,
     dividers: 0,
     construction: { ...DEFAULT_CONSTRUCTION },
+    doors: 0,
+    doorGap: 3,
+    doorOpening: 'double',
+    handleEnabled: false,
+    jointType: 'confirmat',
+    frontMaterial: input.material ?? null,
+    boardOnly: false,
   };
 }
 

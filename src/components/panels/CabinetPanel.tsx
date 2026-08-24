@@ -8,10 +8,13 @@ import {
   type BackType,
   type BottomMount,
   type CabinetParameters,
+  type DoorOpening,
+  type JointType,
   type TopMount,
 } from '@/engines/furniture/cabinet';
 import { buildSpecification } from '@/engines/bom/specification';
 import type { FurnitureId } from '@/core/model/ids';
+import type { TemplateBinding } from '@/engines/templates';
 
 const TOP_OPTIONS: Array<[TopMount, string]> = [
   ['between', 'Между боковинами'],
@@ -27,11 +30,24 @@ const BACK_OPTIONS: Array<[BackType, string]> = [
   ['inset', 'Вкладная'],
   ['groove', 'В паз'],
 ];
+const DOOR_OPTIONS: Array<[DoorOpening, string]> = [
+  ['left', 'Левое'],
+  ['right', 'Правое'],
+  ['double', 'Двойное'],
+];
+const JOINT_OPTIONS: Array<[JointType, string]> = [
+  ['confirmat', 'Конфирмат'],
+  ['dowel', 'Шкант'],
+  ['minifix', 'Минификс'],
+];
 
 export function CabinetPanel({ furnitureId }: { furnitureId: FurnitureId }) {
   const furniture = useEditorStore((s) => findFurniture(s.project, furnitureId));
   const materials = useEditorStore((s) => s.project.materials);
   const update = useEditorStore((s) => s.updateCabinetParams);
+  const detach = useEditorStore((s) => s.detachTemplate);
+  const saveAsTemplate = useEditorStore((s) => s.saveFurnitureAsTemplate);
+  const binding = furniture?.metadata?.template as TemplateBinding | undefined;
 
   const params = useMemo(() => readCabinetParameters(furniture?.params), [furniture?.params]);
   const parts = furniture?.assemblies[0]?.parts ?? [];
@@ -87,6 +103,43 @@ export function CabinetPanel({ furnitureId }: { furnitureId: FurnitureId }) {
           </select>
         </div>
       </div>
+
+      <div className="panel-section">
+        <h3>Фасады и соединения</h3>
+        <div className="field-row">
+          <NumberField label="Фасады" min={0} value={params.doors} onCommit={(v) => set({ doors: Math.max(0, Math.round(v)) })} />
+          <NumberField label="Зазор фасадов" suffix="мм" min={0} value={params.doorGap} onCommit={(v) => set({ doorGap: Math.max(0, v) })} />
+        </div>
+        <div className="field">
+          <label>Открывание</label>
+          <select value={params.doorOpening} onChange={(e) => set({ doorOpening: e.target.value as DoorOpening })}>
+            {DOOR_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Соединение корпуса</label>
+          <select value={params.jointType} onChange={(e) => set({ jointType: e.target.value as JointType })}>
+            {JOINT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+        <label className="field" style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          <input type="checkbox" checked={params.handleEnabled} onChange={(e) => set({ handleEnabled: e.target.checked })} />
+          <span>Ручки на фасадах</span>
+        </label>
+      </div>
+
+      {binding && (
+        <div className="panel-section">
+          <h3>Шаблон</h3>
+          <div className="dim" style={{ marginBottom: 6 }}>
+            {binding.detached ? 'Отвязан от шаблона (свободное редактирование).' : `Связан с шаблоном.`}
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {!binding.detached && <button onClick={() => detach(furnitureId)}>Отвязать от шаблона</button>}
+            <button onClick={() => { const name = prompt('Название шаблона:', furniture.name); if (name) { saveAsTemplate(furnitureId, name); alert('Шаблон сохранён.'); } }}>Сохранить как шаблон</button>
+          </div>
+        </div>
+      )}
 
       <div className="panel-section">
         <h3>Спецификация</h3>
