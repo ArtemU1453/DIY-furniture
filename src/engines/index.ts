@@ -3,7 +3,7 @@
  * Регистрирует движки по умолчанию для каждого домена.
  */
 import { registerCuttingEngine } from './cutting/CuttingEngine';
-import { BasicShelfEngine } from './cutting/BasicShelfEngine';
+import { MaxRectsEngine } from './cutting/MaxRectsEngine';
 import { registerFurnitureEngine, CustomFurnitureEngine } from './furniture/FurnitureEngine';
 import { CabinetEngine } from './furniture/cabinet/CabinetEngine';
 import { registerMachiningEngine, NoopMachiningEngine } from './machining/MachiningEngine';
@@ -15,7 +15,7 @@ export function bootstrapEngines(): void {
   if (bootstrapped) return;
   bootstrapped = true;
 
-  registerCuttingEngine(new BasicShelfEngine());
+  registerCuttingEngine(new MaxRectsEngine());
   registerFurnitureEngine(new CustomFurnitureEngine());
   registerFurnitureEngine(new CabinetEngine());
   registerMachiningEngine(new NoopMachiningEngine());
@@ -25,4 +25,4 @@ export function bootstrapEngines(): void {
 export { getCuttingEngine, listCuttingEngines } from './cutting/CuttingEngine';
 export { calculateFurniture } from './furniture/FurnitureEngine';
 export type { CuttingEngine } from './cutting/CuttingEngine';
-export type { CuttingInput, CuttingResult, StockSheet } from './cutting/types';
+export type { CuttingInput, CuttingResult } from './cutting/types';

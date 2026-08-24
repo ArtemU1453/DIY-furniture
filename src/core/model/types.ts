@@ -276,30 +276,111 @@ export interface Furniture {
 // Раскрой (типы данных; алгоритм — в engines/cutting)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface CuttingPiece {
-  pieceId: string;
-  partId: PartId;
-  length: Mm;
-  width: Mm;
-  grain: GrainDirection;
-  allowRotate: boolean;
-  materialId: MaterialId;
+/** Ориентация детали на листе (архитектура допускает 180/270 в будущем). */
+export type PieceRotation = 0 | 90;
+export type PlacementOrigin = 'automatic' | 'manual';
+
+/** Технологическая обрезка листа по краям. */
+export interface TrimSettings {
+  left: Mm;
+  right: Mm;
+  top: Mm;
+  bottom: Mm;
 }
 
-export interface CuttingSheet {
+/** Зафиксированное вручную размещение (не двигается автоалгоритмом). */
+export interface LockedPlacement {
+  pieceId: string;
+  sheetIndex: number;
+  x: Mm;
+  y: Mm;
+  rotation: PieceRotation;
+}
+
+/** Размещение детали на листе (реальные координаты результата раскроя). */
+export interface Placement {
+  pieceId: string;
+  partId: PartId;
+  name: string;
+  number: string;
+  x: Mm;
+  y: Mm;
+  length: Mm;
+  width: Mm;
+  rotation: PieceRotation;
+  origin: PlacementOrigin;
+  locked: boolean;
+}
+
+/** Прямоугольный остаток листа (для будущего модуля склада). */
+export interface CuttingRemnant {
+  id: string;
+  sheetId: string;
+  materialId: MaterialId;
+  x: Mm;
+  y: Mm;
+  width: Mm;
+  height: Mm;
+}
+
+export interface CuttingSheetResult {
+  id: string;
   materialId: MaterialId;
   index: number;
   length: Mm;
   width: Mm;
-  placements: Array<{
-    pieceId: string;
-    partId: PartId;
-    x: Mm;
-    y: Mm;
-    length: Mm;
-    width: Mm;
-    rotated: boolean;
-  }>;
+  trim: TrimSettings;
+  placements: Placement[];
+  remnants: CuttingRemnant[];
+  usableAreaMm2: number;
+  usedAreaMm2: number;
+  wasteAreaMm2: number;
+  utilization: number;
+}
+
+export interface CuttingStatistics {
+  materialId: MaterialId;
+  materialName: string;
+  pieceCount: number;
+  sheetCount: number;
+  piecesAreaMm2: number;
+  sheetsUsableAreaMm2: number;
+  wasteAreaMm2: number;
+  utilization: number;
+}
+
+/** Результат раскроя одного материала («расчётный вариант»). */
+export interface CuttingResult {
+  materialId: MaterialId;
+  sheets: CuttingSheetResult[];
+  unplaced: Array<{ pieceId: string; partId: PartId; name: string; number: string; length: Mm; width: Mm }>;
+  statistics: CuttingStatistics;
+  attemptsRun: number;
+}
+
+/** Настройки раскроя (сохраняются в проекте). */
+export interface CuttingSettings {
+  respectGrain: boolean;
+  attempts: number;
+  sortStrategy: string;
+  minRemnant: Mm;
+  trim: TrimSettings;
+  kerfOverride?: Mm;
+  sheetOverrides: Record<string, { length: Mm; width: Mm }>;
+  locked: LockedPlacement[];
+}
+
+/** Сохранённый результат раскроя + версия исходной модели (для инвалидации). */
+export interface CuttingReport {
+  jobs: CuttingResult[];
+  generatedAt: string;
+  sourceVersion: string;
+}
+
+/** Состояние раскроя на уровне проекта. */
+export interface CuttingState {
+  settings: CuttingSettings;
+  report?: CuttingReport;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -342,6 +423,7 @@ export interface Project {
   hardware: Hardware[];
   hardwareConnections: HardwareConnection[];
   machining: MachiningState;
+  cutting: CuttingState;
   furnitures: Furniture[];
   metadata?: Record<string, unknown>;
 }
