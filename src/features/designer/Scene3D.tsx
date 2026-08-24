@@ -5,12 +5,63 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { useEditorStore } from '@/app/store/editorStore';
 import { allParts, findPart } from '@/core/model/selectors';
 import { partWorldAABB } from '@/core/geometry/partGeometry';
-import type { MaterialId } from '@/core/model/ids';
+import { operationWorld } from '@/core/geometry/coordinateSystem';
+import { allOperations } from '@/engines/machining';
+import type { MachiningId, MaterialId } from '@/core/model/ids';
 import type { Material, Project } from '@/core/model/types';
 import { PartMesh } from './PartMesh';
 import { ViewControls, type StandardView, VIEW_POSITIONS } from './ViewControls';
 
 const MM_TO_UNIT = 1 / 1000;
+
+/** Визуализация присадки: маркеры отверстий на деталях. */
+function MachiningLayer({
+  project,
+  selectedId,
+  onSelect,
+}: {
+  project: Project;
+  selectedId: MachiningId | null;
+  onSelect: (id: MachiningId) => void;
+}) {
+  const markers = useMemo(() => {
+    return allOperations(project)
+      .map((op) => {
+        const part = findPart(project, op.partId);
+        if (!part) return null;
+        const w = operationWorld(part, op.face, op.x, op.y);
+        return {
+          id: op.id,
+          origin: op.origin,
+          r: Math.max((op.diameter ?? 6) / 2, 3) * MM_TO_UNIT,
+          pos: [w.position.x * MM_TO_UNIT, w.position.y * MM_TO_UNIT, w.position.z * MM_TO_UNIT] as [number, number, number],
+        };
+      })
+      .filter((m): m is NonNullable<typeof m> => m !== null);
+  }, [project]);
+
+  return (
+    <group>
+      {markers.map((m) => {
+        const sel = m.id === selectedId;
+        const color = sel ? '#ffcf4c' : m.origin === 'manual' ? '#e0803c' : '#e5534b';
+        return (
+          <mesh
+            key={m.id}
+            position={m.pos}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(m.id);
+            }}
+          >
+            <sphereGeometry args={[sel ? m.r * 1.6 : m.r, 12, 12]} />
+            <meshBasicMaterial color={color} />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
 
 /** Визуализация связей фурнитуры: линия между центрами деталей + точка. */
 function ConnectionsLayer({ project, selectedId }: { project: Project; selectedId: string | null }) {
@@ -76,11 +127,13 @@ function CameraRig({ apiRef }: { apiRef: React.MutableRefObject<CameraApi | null
   return null;
 }
 
-export function Scene3D({ showNumbers }: { showNumbers?: boolean }) {
+export function Scene3D({ showNumbers, showMachining }: { showNumbers?: boolean; showMachining?: boolean }) {
   const project = useEditorStore((s) => s.project);
   const selectedPartId = useEditorStore((s) => s.selectedPartId);
   const selectedConnectionId = useEditorStore((s) => s.selectedConnectionId);
+  const selectedOperationId = useEditorStore((s) => s.selectedOperationId);
   const selectPart = useEditorStore((s) => s.selectPart);
+  const selectOperation = useEditorStore((s) => s.selectOperation);
 
   const apiRef = useRef<CameraApi | null>(null);
 
@@ -131,6 +184,9 @@ export function Scene3D({ showNumbers }: { showNumbers?: boolean }) {
         ))}
 
         <ConnectionsLayer project={project} selectedId={selectedConnectionId} />
+        {showMachining && (
+          <MachiningLayer project={project} selectedId={selectedOperationId} onSelect={selectOperation} />
+        )}
 
         <OrbitControls makeDefault enablePan enableZoom enableRotate />
       </Canvas>

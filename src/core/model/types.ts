@@ -84,20 +84,62 @@ export interface EdgeMaterial {
 // Присадка
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Технологическая операция присадки. Координаты — в плоскости детали. */
+/** Тип технологической операции. Расширяется без переписывания системы. */
+export type MachiningType =
+  | 'drilling' // сверление (сквозное/глухое отверстие)
+  | 'boring' // присадка под чашку (напр. петля)
+  | 'pocket' // выборка/карман
+  | 'slot' // паз
+  | 'dowel' // отверстие под шкант
+  | 'confirmat' // отверстие под конфирмат
+  | 'hinge' // присадка под петлю
+  | 'custom';
+
+/** Грань детали, с которой заходит инструмент. */
+export type PartFace = 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right';
+
+/** Происхождение операции: авто из конструкции или ручная. */
+export type MachiningOrigin = 'generated' | 'manual';
+
+/**
+ * Технологическая операция присадки. Координаты x/y заданы в ЛОКАЛЬНОЙ системе
+ * координат грани детали (мм), z/depth — вдоль оси сверления. Перевод в мировые
+ * координаты выполняется на границе 3D (см. core/geometry/coordinate-system).
+ */
 export interface MachiningOperation {
   id: MachiningId;
-  type: string; // ключ в реестре операций: 'hole' | 'confirmat' | 'hinge' | ...
+  type: MachiningType;
+  partId: PartId;
+  face: PartFace;
   x: Mm;
   y: Mm;
-  z?: Mm;
+  z: Mm;
   diameter?: Mm;
   depth?: Mm;
+  length?: Mm; // для пазов/карманов
+  width?: Mm; // для пазов/карманов
   angle?: number;
-  side: EdgeSide | 'front' | 'back';
   through?: boolean;
-  params?: Record<string, number | string | boolean>;
+  direction?: Vec3; // направление сверления (единичный вектор в лок. координатах)
+  origin: MachiningOrigin;
+  sequence?: number;
+  sourceHardwareConnectionId?: HardwareConnectionId;
+  parameters?: Record<string, number | string | boolean>;
   metadata?: Record<string, unknown>;
+}
+
+/** Технологические ограничения присадки (не зашиваются в UI). */
+export interface MachiningConstraints {
+  minDiameter: Mm;
+  maxDepthRatio: number; // максимум depth / thickness для глухого отверстия (0..1]
+  minEdgeOffset: Mm;
+  minHoleSpacing: Mm; // мин. расстояние между центрами отверстий
+  allowedFaces: PartFace[];
+}
+
+/** Состояние присадки на уровне проекта. Ручные операции хранятся в деталях. */
+export interface MachiningState {
+  constraints: MachiningConstraints;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -299,6 +341,7 @@ export interface Project {
   edges: EdgeMaterial[];
   hardware: Hardware[];
   hardwareConnections: HardwareConnection[];
+  machining: MachiningState;
   furnitures: Furniture[];
   metadata?: Record<string, unknown>;
 }
