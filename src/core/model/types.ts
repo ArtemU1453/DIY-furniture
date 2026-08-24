@@ -383,6 +383,12 @@ export interface CuttingState {
   report?: CuttingReport;
 }
 
+/** Состояние документации. version — сигнатура модели на момент генерации
+ *  (для статуса OUTDATED). Сами документы — производные, не хранятся. */
+export interface DocumentsState {
+  version?: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Чертёж (тип данных; построение — в engines/drawings)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -424,6 +430,7 @@ export interface Project {
   hardwareConnections: HardwareConnection[];
   machining: MachiningState;
   cutting: CuttingState;
+  documents: DocumentsState;
   furnitures: Furniture[];
   metadata?: Record<string, unknown>;
 }

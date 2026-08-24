@@ -13,12 +13,13 @@ import { MaterialsView } from '@/components/panels/MaterialsView';
 import { HardwareView } from '@/components/panels/HardwareView';
 import { MachiningView } from '@/components/panels/MachiningView';
 import { CuttingView } from '@/components/panels/CuttingView';
+import { DocumentsView } from '@/components/panels/DocumentsView';
 import { Scene3D } from '@/features/designer/Scene3D';
 import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { saveCurrentProject } from '@/features/project/projectActions';
 
-type CenterView = '3d' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting';
+type CenterView = '3d' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents';
 type ViewMode = '3d' | '2d' | 'split';
 
 export function App() {
@@ -92,6 +93,7 @@ export function App() {
           else if (s === 'materials') setCenterView('materials');
           else if (s === 'hardware') setCenterView('hardware');
           else if (s === 'cutting') setCenterView('cutting');
+          else if (s === 'drawings' || s === 'documents') setCenterView('documents');
           else if (s === 'furniture' || s === 'project') setCenterView('3d');
         }}
         onCreateFurniture={() => setCreateOpen(true)}
@@ -106,6 +108,7 @@ export function App() {
               ['hardware', 'Фурнитура'],
               ['machining', 'Присадка'],
               ['cutting', 'Раскрой'],
+              ['documents', 'Документы'],
             ] as Array<[CenterView, string]>
           ).map(([v, label]) => (
             <button key={v} className={centerView === v ? 'active' : ''} onClick={() => setCenterView(v)}>
@@ -151,6 +154,7 @@ export function App() {
           {centerView === 'hardware' && <HardwareView />}
           {centerView === 'machining' && <MachiningView />}
           {centerView === 'cutting' && <CuttingView />}
+          {centerView === 'documents' && <DocumentsView />}
         </div>
       </div>
       <RightPanel />
