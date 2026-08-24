@@ -4,12 +4,13 @@
  * UI и остальная система знают ТОЛЬКО этот интерфейс, а не конкретный
  * алгоритм. Более эффективный алгоритм регистрируется позже без изменения UI.
  */
-import type { CuttingInput, CuttingResult } from './types';
+import type { CuttingInput, CuttingResult, CuttingRunControls } from './types';
 
 export interface CuttingEngine {
   readonly id: string;
   readonly name: string;
-  calculate(input: CuttingInput): CuttingResult;
+  /** Рассчитать раскрой одного материала. controls — прогресс/отмена. */
+  calculate(input: CuttingInput, controls?: CuttingRunControls): CuttingResult;
 }
 
 /** Реестр движков раскроя. */

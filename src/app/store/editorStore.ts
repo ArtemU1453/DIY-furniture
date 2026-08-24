@@ -18,10 +18,13 @@ import type {
 } from '@/core/model/ids';
 import { newHardwareConnectionId, newMachiningId } from '@/core/model/ids';
 import type {
+  CuttingReport,
+  CuttingSettings,
   EdgeMaterial,
   Furniture,
   Hardware,
   HardwareConnection,
+  LockedPlacement,
   MachiningOperation,
   Material,
   Part,
@@ -29,6 +32,8 @@ import type {
   Project,
   ProjectSettings,
 } from '@/core/model/types';
+import { runCuttingInWorker, type CuttingHandle } from '@/workers/cuttingClient';
+import type { CuttingProgress } from '@/engines/cutting';
 import { createAssembly, createFurniture, createPart, createProject } from '@/core/model/factory';
 import {
   findAssemblyOfPart,
@@ -71,6 +76,10 @@ export interface EditorState {
   activeFurnitureId: FurnitureId | null;
   selectedConnectionId: HardwareConnectionId | null;
   selectedOperationId: MachiningId | null;
+  selectedCuttingPieceId: string | null;
+  cuttingRunning: boolean;
+  cuttingProgress: CuttingProgress | null;
+  cuttingError: string | null;
   past: Project[];
   future: Project[];
 
@@ -133,6 +142,14 @@ export interface EditorState {
   removeOperation: (id: MachiningId) => void;
   selectOperation: (id: MachiningId | null) => void;
 
+  // ── Раскрой ──────────────────────────────────────────────────────────────
+  updateCuttingSettings: (patch: Partial<CuttingSettings>) => void;
+  recalculateCutting: () => Promise<void>;
+  cancelCutting: () => void;
+  setLockedPlacement: (placement: LockedPlacement) => void;
+  clearLockedPlacements: () => void;
+  selectCuttingPiece: (pieceId: string | null) => void;
+
   // ── Выбор ────────────────────────────────────────────────────────────────
   selectPart: (id: PartId | null) => void;
 
@@ -145,6 +162,9 @@ export interface EditorState {
 
 export const useEditorStore = create<EditorState>()(
   immer((set, get) => {
+    // Хэндл текущего расчёта раскроя (вне состояния — для отмены).
+    let cuttingHandle: CuttingHandle | null = null;
+
     /** Применить изменение модели с записью в историю. */
     const commit = (recipe: (project: Project) => void) => {
       const prev = get().project; // финализированный неизменяемый снимок
@@ -183,6 +203,10 @@ export const useEditorStore = create<EditorState>()(
       activeFurnitureId: null,
       selectedConnectionId: null,
       selectedOperationId: null,
+      selectedCuttingPieceId: null,
+      cuttingRunning: false,
+      cuttingProgress: null,
+      cuttingError: null,
       past: [],
       future: [],
 
@@ -193,6 +217,10 @@ export const useEditorStore = create<EditorState>()(
           state.activeFurnitureId = null;
           state.selectedConnectionId = null;
           state.selectedOperationId = null;
+          state.selectedCuttingPieceId = null;
+          state.cuttingRunning = false;
+          state.cuttingProgress = null;
+          state.cuttingError = null;
           state.past = [];
           state.future = [];
         });
@@ -206,6 +234,10 @@ export const useEditorStore = create<EditorState>()(
             project.furnitures.find((f) => f.type === 'cabinet')?.id ?? null;
           state.selectedConnectionId = null;
           state.selectedOperationId = null;
+          state.selectedCuttingPieceId = null;
+          state.cuttingRunning = false;
+          state.cuttingProgress = null;
+          state.cuttingError = null;
           state.past = [];
           state.future = [];
         });
@@ -417,6 +449,64 @@ export const useEditorStore = create<EditorState>()(
       },
 
       selectOperation: (id) => set((s) => void (s.selectedOperationId = id)),
+
+      updateCuttingSettings: (patch) =>
+        commit((p) => {
+          Object.assign(p.cutting.settings, patch);
+        }),
+
+      recalculateCutting: async () => {
+        cuttingHandle?.cancel();
+        set((s) => {
+          s.cuttingRunning = true;
+          s.cuttingError = null;
+          s.cuttingProgress = { fraction: 0, message: 'Запуск…' };
+        });
+        const project = get().project;
+        const handle = runCuttingInWorker(project, (pr) =>
+          set((s) => void (s.cuttingProgress = pr)),
+        );
+        cuttingHandle = handle;
+        try {
+          const report: CuttingReport = await handle.promise;
+          set((s) => {
+            s.project.cutting.report = report;
+            s.cuttingRunning = false;
+            s.cuttingProgress = null;
+          });
+        } catch (err) {
+          set((s) => {
+            s.cuttingRunning = false;
+            s.cuttingProgress = null;
+            s.cuttingError = err instanceof Error && err.name === 'CuttingCancelledError' ? null : (err instanceof Error ? err.message : 'Ошибка расчёта');
+          });
+        } finally {
+          if (cuttingHandle === handle) cuttingHandle = null;
+        }
+      },
+
+      cancelCutting: () => {
+        cuttingHandle?.cancel();
+        cuttingHandle = null;
+        set((s) => {
+          s.cuttingRunning = false;
+          s.cuttingProgress = null;
+        });
+      },
+
+      setLockedPlacement: (placement) =>
+        commit((p) => {
+          const list = p.cutting.settings.locked.filter((l) => l.pieceId !== placement.pieceId);
+          list.push(placement);
+          p.cutting.settings.locked = list;
+        }),
+
+      clearLockedPlacements: () =>
+        commit((p) => {
+          p.cutting.settings.locked = [];
+        }),
+
+      selectCuttingPiece: (pieceId) => set((s) => void (s.selectedCuttingPieceId = pieceId)),
 
       selectPart: (id) =>
         set((state) => {

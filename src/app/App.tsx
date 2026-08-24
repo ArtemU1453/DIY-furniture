@@ -11,10 +11,11 @@ import { PartsTable } from '@/components/panels/PartsTable';
 import { MaterialsView } from '@/components/panels/MaterialsView';
 import { HardwareView } from '@/components/panels/HardwareView';
 import { MachiningView } from '@/components/panels/MachiningView';
+import { CuttingView } from '@/components/panels/CuttingView';
 import { Scene3D } from '@/features/designer/Scene3D';
 import { createAutosaver } from '@/storage/backup/autosave';
 
-type CenterView = '3d' | 'table' | 'materials' | 'hardware' | 'machining';
+type CenterView = '3d' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting';
 
 export function App() {
   const [status, setStatus] = useState('');
@@ -78,6 +79,7 @@ export function App() {
           if (s === 'parts') setCenterView('table');
           else if (s === 'materials') setCenterView('materials');
           else if (s === 'hardware') setCenterView('hardware');
+          else if (s === 'cutting') setCenterView('cutting');
           else if (s === 'furniture' || s === 'project') setCenterView('3d');
         }}
         onCreateFurniture={() => setCreateOpen(true)}
@@ -91,6 +93,7 @@ export function App() {
               ['materials', 'Материалы'],
               ['hardware', 'Фурнитура'],
               ['machining', 'Присадка'],
+              ['cutting', 'Раскрой'],
             ] as Array<[CenterView, string]>
           ).map(([v, label]) => (
             <button key={v} className={centerView === v ? 'active' : ''} onClick={() => setCenterView(v)}>
@@ -116,6 +119,7 @@ export function App() {
           {centerView === 'materials' && <MaterialsView />}
           {centerView === 'hardware' && <HardwareView />}
           {centerView === 'machining' && <MachiningView />}
+          {centerView === 'cutting' && <CuttingView />}
         </div>
       </div>
       <RightPanel />

@@ -6,7 +6,7 @@
  * структуры; несовместимые версии отклоняются с понятной ошибкой.
  */
 import { PROJECT_FORMAT_VERSION, type Project } from '@/core/model/types';
-import { DEFAULT_MACHINING_CONSTRAINTS } from '@/core/model/factory';
+import { DEFAULT_CUTTING_SETTINGS, DEFAULT_MACHINING_CONSTRAINTS } from '@/core/model/factory';
 
 export const PROJECT_FILE_EXTENSION = '.furniture.json';
 
@@ -52,6 +52,9 @@ export function deserializeProject(json: string): Project {
   if (!Array.isArray(project.hardwareConnections)) project.hardwareConnections = [];
   if (!project.machining || typeof project.machining !== 'object') {
     project.machining = { constraints: { ...DEFAULT_MACHINING_CONSTRAINTS } };
+  }
+  if (!project.cutting || typeof project.cutting !== 'object') {
+    project.cutting = { settings: { ...DEFAULT_CUTTING_SETTINGS, trim: { ...DEFAULT_CUTTING_SETTINGS.trim }, sheetOverrides: {}, locked: [] } };
   }
   const major = project.version.split('.')[0];
   const currentMajor = PROJECT_FORMAT_VERSION.split('.')[0];
