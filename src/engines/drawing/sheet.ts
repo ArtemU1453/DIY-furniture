@@ -12,9 +12,12 @@ export type DocumentType =
   | 'ASSEMBLY_DRAWING'
   | 'PART_DRAWING'
   | 'CUTTING_DRAWING'
+  | 'CUTTING_MAP'
   | 'MACHINING_DRAWING'
   | 'SPECIFICATION'
+  | 'PARTS_LIST'
   | 'HARDWARE_LIST'
+  | 'PROJECT_SUMMARY'
   | 'PRODUCTION_REPORT';
 
 export interface TitleBlock {

@@ -73,6 +73,9 @@ export function deserializeProject(json: string): Project {
   if (!project.documents || typeof project.documents !== 'object') {
     project.documents = {};
   }
+  // Настройки чертежа и история генерации (этап 11).
+  if (!project.documents.settings) project.documents.settings = { scaleOverrides: {}, hidden: {} };
+  if (!Array.isArray(project.documents.history)) project.documents.history = [];
   const major = project.version.split('.')[0];
   const currentMajor = PROJECT_FORMAT_VERSION.split('.')[0];
   if (major !== currentMajor) {

@@ -37,7 +37,9 @@ import type {
 import { newSheetMaterialId, newStoredRemnantId } from '@/core/model/ids';
 import { runCuttingInWorker, type CuttingHandle } from '@/workers/cuttingClient';
 import type { CuttingProgress } from '@/engines/cutting';
-import { documentsSignature } from '@/engines/drawing';
+import { documentsSignature, nextDocVersion } from '@/engines/drawing';
+import { runProductionCheck } from '@/engines/status';
+import type { ProjectIssue } from '@/engines/status';
 import { inferJointType } from '@/engines/machining';
 import { hardwareFromTemplate, type HardwareTemplate } from '@/core/model/hardwareCatalog';
 import { createAssembly, createFurniture, createPart, createProject } from '@/core/model/factory';
@@ -136,6 +138,10 @@ export interface EditorState {
 
   // ── Документы ────────────────────────────────────────────────────────────────
   markDocumentsGenerated: () => void;
+  /** Сформировать документы: сначала ProductionCheck; при ERROR не генерирует. */
+  generateDocuments: () => { ok: boolean; errors: ProjectIssue[] };
+  setDocumentScale: (docKey: string, scale: number | 'AUTO') => void;
+  toggleDrawingLayer: (layer: string) => void;
 
   // ── Материалы ───────────────────────────────────────────────────────────────
   addMaterial: (material: Material) => void;
@@ -433,7 +439,42 @@ export const useEditorStore = create<EditorState>()(
 
       markDocumentsGenerated: () =>
         commit((p) => {
-          p.documents.version = documentsSignature(p);
+          const version = documentsSignature(p);
+          p.documents.version = version;
+          const docVersion = nextDocVersion(p.documents.docVersion);
+          p.documents.docVersion = docVersion;
+          if (!p.documents.history) p.documents.history = [];
+          p.documents.history.push({
+            generatedAt: new Date().toISOString(),
+            modelVersion: version,
+            docVersion,
+            documents: ['summary', 'assembly', 'partsList', 'hardwareList', 'parts', 'machining', 'cutting'],
+            status: 'CURRENT',
+          });
+          // Ограничиваем историю последними 50 записями.
+          if (p.documents.history.length > 50) p.documents.history = p.documents.history.slice(-50);
+        }),
+
+      generateDocuments: () => {
+        const project = get().project;
+        const check = runProductionCheck(project, { cuttingRunning: get().cuttingRunning });
+        const errors = check.issues.filter((i) => i.severity === 'error');
+        // ERROR блокирует генерацию комплекта; WARNING — не блокирует (§30).
+        if (errors.length > 0) return { ok: false, errors };
+        get().markDocumentsGenerated();
+        return { ok: true, errors: [] };
+      },
+
+      setDocumentScale: (docKey, scale) =>
+        commit((p) => {
+          if (!p.documents.settings) p.documents.settings = { scaleOverrides: {}, hidden: {} };
+          p.documents.settings.scaleOverrides[docKey] = scale;
+        }),
+
+      toggleDrawingLayer: (layer) =>
+        commit((p) => {
+          if (!p.documents.settings) p.documents.settings = { scaleOverrides: {}, hidden: {} };
+          p.documents.settings.hidden[layer] = !p.documents.settings.hidden[layer];
         }),
 
       removePart: (id) => {

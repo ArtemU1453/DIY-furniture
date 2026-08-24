@@ -305,7 +305,7 @@ export function createProject(input: CreateProjectInput = {}): Project {
     cutting: { settings: makeCuttingSettings() },
     sheets: createDefaultSheets(materials),
     remnants: [],
-    documents: {},
+    documents: { settings: { scaleOverrides: {}, hidden: {} }, history: [] },
     furnitures: [furniture],
   };
 }
