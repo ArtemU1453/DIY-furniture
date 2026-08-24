@@ -23,6 +23,7 @@ export function TopBar({ onOpenProjects, onOpenSettings, onNewProject, setStatus
 
   const handleSave = async () => {
     await saveCurrentProject();
+    useEditorStore.getState().setSaveState('saved');
     setStatus('Проект сохранён локально');
   };
 

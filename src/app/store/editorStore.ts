@@ -16,7 +16,7 @@ import type {
   MaterialId,
   PartId,
 } from '@/core/model/ids';
-import { newHardwareConnectionId, newMachiningId } from '@/core/model/ids';
+import { newHardwareConnectionId, newMachiningId, newPartId } from '@/core/model/ids';
 import type {
   CuttingReport,
   CuttingSettings,
@@ -70,6 +70,20 @@ export interface CreateConnectionResult {
 
 const HISTORY_LIMIT = 100;
 
+/** Максимальный номер детали (Pxxx) в проекте — для назначения новых номеров. */
+function allPartNumbers(project: Project): number {
+  let max = 0;
+  for (const f of project.furnitures) {
+    for (const a of f.assemblies) {
+      for (const p of a.parts) {
+        const n = Number(String(p.metadata?.number ?? '').replace(/^P/, ''));
+        if (Number.isFinite(n)) max = Math.max(max, n);
+      }
+    }
+  }
+  return max;
+}
+
 export interface EditorState {
   project: Project;
   selectedPartId: PartId | null;
@@ -80,6 +94,8 @@ export interface EditorState {
   cuttingRunning: boolean;
   cuttingProgress: CuttingProgress | null;
   cuttingError: string | null;
+  saveState: 'saved' | 'unsaved' | 'saving';
+  focusNonce: number;
   past: Project[];
   future: Project[];
 
@@ -101,8 +117,16 @@ export interface EditorState {
 
   // ── Детали ────────────────────────────────────────────────────────────────
   addPart: (input?: CreatePartInput) => PartId;
+  addElement: (kind: 'panel' | 'shelf' | 'divider' | 'facade' | 'back') => PartId;
   removePart: (id: PartId) => void;
   updatePart: (id: PartId, patch: Partial<Part>) => void;
+  duplicatePart: (id: PartId) => PartId | null;
+  setPartFlag: (id: PartId, patch: { hidden?: boolean; locked?: boolean }) => void;
+  renameFurniture: (id: FurnitureId, name: string) => void;
+
+  // ── Сохранение / фокус ──────────────────────────────────────────────────────
+  setSaveState: (state: 'saved' | 'unsaved' | 'saving') => void;
+  requestFocus: () => void;
 
   // ── Материалы ───────────────────────────────────────────────────────────────
   addMaterial: (material: Material) => void;
@@ -174,6 +198,7 @@ export const useEditorStore = create<EditorState>()(
         state.future = [];
         recipe(state.project);
         state.project.updatedAt = new Date().toISOString();
+        state.saveState = 'unsaved';
       });
     };
 
@@ -207,6 +232,8 @@ export const useEditorStore = create<EditorState>()(
       cuttingRunning: false,
       cuttingProgress: null,
       cuttingError: null,
+      saveState: 'saved',
+      focusNonce: 0,
       past: [],
       future: [],
 
@@ -312,6 +339,73 @@ export const useEditorStore = create<EditorState>()(
         });
         return part.id;
       },
+
+      addElement: (kind) => {
+        const project = get().project;
+        const material = project.materials.find((m) => m.kind === 'ldsp')?.id ?? project.materials[0]?.id ?? null;
+        const back = project.materials.find((m) => m.kind === 'other')?.id ?? material;
+        const presets: Record<string, CreatePartInput> = {
+          panel: { name: 'Панель', role: 'custom', width: 600, height: 300, thickness: 16, material },
+          shelf: { name: 'Полка', role: 'shelf', width: 600, height: 300, thickness: 16, material },
+          divider: { name: 'Перегородка', role: 'divider', width: 300, height: 600, thickness: 16, material },
+          facade: { name: 'Фасад', role: 'facade', width: 400, height: 700, thickness: 16, material },
+          back: { name: 'Задняя стенка', role: 'back', width: 800, height: 2000, thickness: 3, material: back },
+        };
+        const part = createPart(presets[kind]);
+        part.metadata = { number: '', addedManually: true };
+        const targetAssembly = get().activeFurnitureId
+          ? findFurniture(project, get().activeFurnitureId!)?.assemblies[0]
+          : firstAssembly(project);
+        commit((p) => {
+          const assembly = targetAssembly
+            ? p.furnitures.flatMap((f) => f.assemblies).find((a) => a.id === targetAssembly.id)
+            : firstAssembly(p);
+          if (assembly) {
+            // назначаем следующий свободный номер Pxxx
+            const maxN = allPartNumbers(p);
+            part.metadata = { ...part.metadata, number: `P${String(maxN + 1).padStart(3, '0')}` };
+            assembly.parts.push(part);
+          }
+        });
+        return part.id;
+      },
+
+      duplicatePart: (id) => {
+        const source = findPart(get().project, id);
+        if (!source) return null;
+        const copy: Part = {
+          ...structuredClone(source),
+          id: newPartId(),
+          name: `${source.name} (копия)`,
+          position: { ...source.position, x: source.position.x + source.thickness + 20 },
+          machining: source.machining.map((op) => ({ ...op, id: newMachiningId() })),
+          metadata: { ...source.metadata, number: '', addedManually: true, duplicatedFrom: source.id },
+        };
+        commit((p) => {
+          const assembly = findAssemblyOfPart(p, id) ?? firstAssembly(p);
+          if (assembly) {
+            const maxN = allPartNumbers(p);
+            copy.metadata = { ...copy.metadata, number: `P${String(maxN + 1).padStart(3, '0')}` };
+            assembly.parts.push(copy);
+          }
+        });
+        return copy.id;
+      },
+
+      setPartFlag: (id, patch) =>
+        commit((p) => {
+          const part = findPart(p, id);
+          if (part) part.metadata = { ...part.metadata, ...patch };
+        }),
+
+      renameFurniture: (id, name) =>
+        commit((p) => {
+          const f = findFurniture(p, id);
+          if (f) f.name = name;
+        }),
+
+      setSaveState: (state) => set((s) => void (s.saveState = state)),
+      requestFocus: () => set((s) => void (s.focusNonce = s.focusNonce + 1)),
 
       removePart: (id) => {
         commit((p) => {

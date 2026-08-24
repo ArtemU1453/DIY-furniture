@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { Line, OrbitControls } from '@react-three/drei';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
@@ -105,6 +105,7 @@ function ConnectionsLayer({ project, selectedId }: { project: Project; selectedI
 
 interface CameraApi {
   setView: (view: StandardView) => void;
+  focusOn: (point: [number, number, number]) => void;
 }
 
 /** Мост между HTML-кнопками видов и камерой внутри Canvas. */
@@ -123,6 +124,18 @@ function CameraRig({ apiRef }: { apiRef: React.MutableRefObject<CameraApi | null
       }
       camera.lookAt(0, 0, 0);
     },
+    focusOn: ([x, y, z]) => {
+      // Приблизить камеру к точке, сохранив направление обзора.
+      const dir = { x: camera.position.x - (controls?.target.x ?? 0), y: camera.position.y - (controls?.target.y ?? 0), z: camera.position.z - (controls?.target.z ?? 0) };
+      const len = Math.hypot(dir.x, dir.y, dir.z) || 1;
+      const dist = 1.2;
+      camera.position.set(x + (dir.x / len) * dist, y + (dir.y / len) * dist, z + (dir.z / len) * dist);
+      if (controls) {
+        controls.target.set(x, y, z);
+        controls.update();
+      }
+      camera.lookAt(x, y, z);
+    },
   };
   return null;
 }
@@ -134,11 +147,25 @@ export function Scene3D({ showNumbers, showMachining }: { showNumbers?: boolean;
   const selectedOperationId = useEditorStore((s) => s.selectedOperationId);
   const selectPart = useEditorStore((s) => s.selectPart);
   const selectOperation = useEditorStore((s) => s.selectOperation);
+  const focusNonce = useEditorStore((s) => s.focusNonce);
 
   const apiRef = useRef<CameraApi | null>(null);
 
-  const parts = useMemo(() => allParts(project), [project]);
+  const parts = useMemo(() => allParts(project).filter((p) => p.metadata?.hidden !== true), [project]);
   const materials = project.materials;
+
+  // Фокус камеры на выбранной детали по запросу (кнопка «Показать»).
+  useEffect(() => {
+    if (focusNonce === 0 || !selectedPartId) return;
+    const part = parts.find((p) => p.id === selectedPartId);
+    if (!part) return;
+    const box = partWorldAABB(part);
+    apiRef.current?.focusOn([
+      ((box.min.x + box.max.x) / 2) * MM_TO_UNIT,
+      ((box.min.y + box.max.y) / 2) * MM_TO_UNIT,
+      ((box.min.z + box.max.z) / 2) * MM_TO_UNIT,
+    ]);
+  }, [focusNonce, selectedPartId, parts]);
 
   const materialMap = useMemo(() => {
     const map = new Map<MaterialId, Material>();
