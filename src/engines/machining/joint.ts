@@ -35,6 +35,16 @@ export interface JointOptions {
 
 const TOL = 1.5; // мм — допуск на касание деталей
 
+/** Определить тип конструктивного узла по взаимной ориентации деталей. */
+export function inferJointType(a: Part, b: Part): import('@/core/model/types').JointType {
+  const joint = analyzeJoint(a, b, { count: 1, edgeOffset: 0 });
+  const tA = partFrame(a).ez;
+  const tB = partFrame(b).ez;
+  const parallel = Math.abs(vec.dot(tA, tB)) > 0.9;
+  if (!joint) return 'BUTT';
+  return parallel ? 'FACE_TO_FACE' : 'EDGE_TO_FACE';
+}
+
 /** Проанализировать соединение. Возвращает null, если детали не соприкасаются. */
 export function analyzeJoint(a: Part, b: Part, opts: JointOptions): JointAnalysis | null {
   const boxA = partWorldAABB(a);

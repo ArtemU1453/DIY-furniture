@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { Line, OrbitControls } from '@react-three/drei';
+import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { useEditorStore } from '@/app/store/editorStore';
 import { allParts, findPart } from '@/core/model/selectors';
@@ -8,11 +9,70 @@ import { partWorldAABB } from '@/core/geometry/partGeometry';
 import { operationWorld } from '@/core/geometry/coordinateSystem';
 import { allOperations } from '@/engines/machining';
 import type { MachiningId, MaterialId } from '@/core/model/ids';
-import type { Material, Project } from '@/core/model/types';
+import type { HardwareCategory, Material, Project } from '@/core/model/types';
 import { PartMesh } from './PartMesh';
 import { ViewControls, type StandardView, VIEW_POSITIONS } from './ViewControls';
 
 const MM_TO_UNIT = 1 / 1000;
+
+/** Цвет глифа фурнитуры по категории крепежа. */
+const HW_COLOR: Partial<Record<HardwareCategory, string>> = {
+  confirmat: '#c9a227', dowel: '#b98a4a', minifix: '#8a9bb5', screw: '#9aa0a6',
+  hinge: '#6cae75', slide: '#5f8dd3', handle: '#c77b53', leg: '#7a7f88', corner: '#b06a9a',
+};
+
+const UP = new THREE.Vector3(0, 1, 0);
+
+/** Визуализация фурнитуры: цилиндрические глифы крепежа вдоль оси присадки. */
+function HardwareLayer({ project, selectedId }: { project: Project; selectedId: string | null }) {
+  const glyphs = useMemo(() => {
+    const byConn = new Map<string, string>();
+    for (const c of project.hardwareConnections) byConn.set(c.id, c.hardwareId);
+    const catOf = new Map<string, HardwareCategory>(project.hardware.map((h) => [h.id as string, h.category]));
+
+    return allOperations(project)
+      .map((op) => {
+        const connId = op.sourceHardwareConnectionId;
+        if (!connId) return null;
+        const part = findPart(project, op.partId);
+        if (!part) return null;
+        const hwId = byConn.get(connId);
+        const cat = hwId ? catOf.get(hwId) : undefined;
+        const w = operationWorld(part, op.face, op.x, op.y);
+        const inward = new THREE.Vector3(w.inward.x, w.inward.y, w.inward.z).normalize();
+        const quat = new THREE.Quaternion().setFromUnitVectors(UP, inward);
+        const len = Math.max(op.depth ?? 12, 6) * MM_TO_UNIT;
+        const pos = new THREE.Vector3(w.position.x, w.position.y, w.position.z)
+          .multiplyScalar(MM_TO_UNIT)
+          .add(inward.clone().multiplyScalar(len / 2));
+        return {
+          id: op.id,
+          connId,
+          r: Math.max((op.diameter ?? 6) / 2, 2) * MM_TO_UNIT,
+          len,
+          pos: [pos.x, pos.y, pos.z] as [number, number, number],
+          quat: [quat.x, quat.y, quat.z, quat.w] as [number, number, number, number],
+          color: (cat && HW_COLOR[cat]) || '#c0a060',
+        };
+      })
+      .filter((g): g is NonNullable<typeof g> => g !== null);
+  }, [project]);
+
+  return (
+    <group>
+      {glyphs.map((g) => (
+        <mesh key={g.id} position={g.pos} quaternion={g.quat}>
+          <cylinderGeometry args={[g.r, g.r, g.len, 12]} />
+          <meshStandardMaterial
+            color={g.connId === selectedId ? '#ffcf4c' : g.color}
+            metalness={0.6}
+            roughness={0.4}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
 
 /** Визуализация присадки: маркеры отверстий на деталях. */
 function MachiningLayer({
@@ -140,7 +200,18 @@ function CameraRig({ apiRef }: { apiRef: React.MutableRefObject<CameraApi | null
   return null;
 }
 
-export function Scene3D({ showNumbers, showMachining }: { showNumbers?: boolean; showMachining?: boolean }) {
+export function Scene3D({
+  showNumbers,
+  showMachining,
+  showHardware,
+  bodyMode = 'construction',
+}: {
+  showNumbers?: boolean;
+  showMachining?: boolean;
+  showHardware?: boolean;
+  bodyMode?: 'construction' | 'body';
+}) {
+  const construction = bodyMode === 'construction';
   const project = useEditorStore((s) => s.project);
   const selectedPartId = useEditorStore((s) => s.selectedPartId);
   const selectedConnectionId = useEditorStore((s) => s.selectedConnectionId);
@@ -210,8 +281,11 @@ export function Scene3D({ showNumbers, showMachining }: { showNumbers?: boolean;
           />
         ))}
 
-        <ConnectionsLayer project={project} selectedId={selectedConnectionId} />
-        {showMachining && (
+        {construction && <ConnectionsLayer project={project} selectedId={selectedConnectionId} />}
+        {construction && showHardware && (
+          <HardwareLayer project={project} selectedId={selectedConnectionId} />
+        )}
+        {construction && showMachining && (
           <MachiningLayer project={project} selectedId={selectedOperationId} onSelect={selectOperation} />
         )}
 

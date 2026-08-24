@@ -21,6 +21,8 @@ export const HARDWARE_CATEGORY_LABELS: Record<HardwareCategory, string> = {
   connector: 'Стяжка',
   corner: 'Уголок',
   screw: 'Саморез',
+  leg: 'Опора',
+  handle: 'Ручка',
   other: 'Другой крепёж',
 };
 
