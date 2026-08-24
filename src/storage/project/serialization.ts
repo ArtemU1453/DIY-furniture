@@ -56,6 +56,9 @@ export function deserializeProject(json: string): Project {
   if (!project.cutting || typeof project.cutting !== 'object') {
     project.cutting = { settings: { ...DEFAULT_CUTTING_SETTINGS, trim: { ...DEFAULT_CUTTING_SETTINGS.trim }, sheetOverrides: {}, locked: [] } };
   }
+  if (!project.documents || typeof project.documents !== 'object') {
+    project.documents = {};
+  }
   const major = project.version.split('.')[0];
   const currentMajor = PROJECT_FORMAT_VERSION.split('.')[0];
   if (major !== currentMajor) {

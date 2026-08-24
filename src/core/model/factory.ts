@@ -265,6 +265,7 @@ export function createProject(input: CreateProjectInput = {}): Project {
     hardwareConnections: [],
     machining: { constraints: { ...DEFAULT_MACHINING_CONSTRAINTS } },
     cutting: { settings: { ...DEFAULT_CUTTING_SETTINGS, trim: { ...DEFAULT_CUTTING_SETTINGS.trim }, sheetOverrides: {}, locked: [] } },
+    documents: {},
     furnitures: [furniture],
   };
 }

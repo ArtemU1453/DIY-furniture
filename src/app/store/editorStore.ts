@@ -34,6 +34,7 @@ import type {
 } from '@/core/model/types';
 import { runCuttingInWorker, type CuttingHandle } from '@/workers/cuttingClient';
 import type { CuttingProgress } from '@/engines/cutting';
+import { documentsSignature } from '@/engines/drawing';
 import { createAssembly, createFurniture, createPart, createProject } from '@/core/model/factory';
 import {
   findAssemblyOfPart,
@@ -127,6 +128,9 @@ export interface EditorState {
   // ── Сохранение / фокус ──────────────────────────────────────────────────────
   setSaveState: (state: 'saved' | 'unsaved' | 'saving') => void;
   requestFocus: () => void;
+
+  // ── Документы ────────────────────────────────────────────────────────────────
+  markDocumentsGenerated: () => void;
 
   // ── Материалы ───────────────────────────────────────────────────────────────
   addMaterial: (material: Material) => void;
@@ -406,6 +410,11 @@ export const useEditorStore = create<EditorState>()(
 
       setSaveState: (state) => set((s) => void (s.saveState = state)),
       requestFocus: () => set((s) => void (s.focusNonce = s.focusNonce + 1)),
+
+      markDocumentsGenerated: () =>
+        commit((p) => {
+          p.documents.version = documentsSignature(p);
+        }),
 
       removePart: (id) => {
         commit((p) => {
