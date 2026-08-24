@@ -200,6 +200,61 @@ const backRule: ConstructionRule = {
   },
 };
 
+// ── Фасады (двери) ────────────────────────────────────────────────────────────
+const facadeRule: ConstructionRule = {
+  id: 'facades',
+  build(ctx) {
+    const { params } = ctx;
+    const n = params.doors;
+    if (n <= 0) return [];
+    const gap = params.construction.facadeGap; // зазор по периметру фасадной зоны
+    const doorGap = params.doorGap; // зазор между фасадами
+    const zoneW = params.width - 2 * gap;
+    const zoneH = params.height - 2 * gap;
+    if (zoneW <= 0 || zoneH <= 0) return [];
+    // Ширина каждого фасада рассчитывается автоматически (не фиксированная).
+    const facadeW = (zoneW - (n - 1) * doorGap) / n;
+    const zFront = params.depth;
+    const ft = params.thickness;
+    const specs: PanelSpec[] = [];
+    for (let i = 0; i < n; i++) {
+      const x0 = gap + i * (facadeW + doorGap);
+      specs.push({
+        key: `facade_${i + 1}`,
+        partType: 'facade',
+        index: i + 1,
+        x: { min: x0, max: x0 + facadeW },
+        y: { min: gap, max: gap + zoneH },
+        z: { min: zFront, max: zFront + ft },
+        thicknessAxis: 'z',
+        material: params.frontMaterial ?? params.material,
+        grain: 'length',
+      });
+    }
+    return specs;
+  },
+};
+
+// ── Полка-щит (единственная деталь для шаблона «Полка») ──────────────────────
+const boardRule: ConstructionRule = {
+  id: 'board',
+  build(ctx) {
+    const { params } = ctx;
+    return [
+      {
+        key: 'board',
+        partType: 'board',
+        x: { min: 0, max: params.width },
+        y: { min: 0, max: params.thickness },
+        z: { min: 0, max: params.depth },
+        thicknessAxis: 'y',
+        material: params.material,
+        grain: 'length',
+      },
+    ];
+  },
+};
+
 /** Порядок правил в базовом корпусе. Расширяется добавлением правил. */
 export const CABINET_RULES: ConstructionRule[] = [
   sidesRule,
@@ -208,4 +263,8 @@ export const CABINET_RULES: ConstructionRule[] = [
   dividersRule,
   shelvesRule,
   backRule,
+  facadeRule,
 ];
+
+/** Правила для полки-щита (единственная деталь). */
+export const BOARD_RULES: ConstructionRule[] = [boardRule];

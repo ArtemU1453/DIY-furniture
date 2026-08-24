@@ -9,6 +9,8 @@ export {
   type TopMount,
   type BottomMount,
   type BackType,
+  type JointType,
+  type DoorOpening,
   type ConstructionSettings,
 } from './parameters';
 export {

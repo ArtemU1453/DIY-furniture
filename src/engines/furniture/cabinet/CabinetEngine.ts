@@ -13,7 +13,7 @@ import { partTypeName, type PartType } from '@/i18n/partNames';
 import type { FurnitureEngine } from '../FurnitureEngine';
 import { readCabinetParameters, type CabinetParameters } from './parameters';
 import { computeCabinetContext } from './context';
-import { CABINET_RULES } from './rules';
+import { CABINET_RULES, BOARD_RULES } from './rules';
 import { panelToPartFields, type PanelSpec } from './panel';
 
 const ROLE_BY_TYPE: Record<PartType, PartRole> = {
@@ -24,6 +24,8 @@ const ROLE_BY_TYPE: Record<PartType, PartRole> = {
   shelf: 'shelf',
   divider: 'divider',
   back: 'back',
+  facade: 'facade',
+  board: 'shelf',
 };
 
 function pad(n: number): string {
@@ -65,9 +67,10 @@ export interface CabinetBuildResult {
 /** Собрать детали и секции шкафа из параметров (чистая функция). */
 export function buildCabinet(params: CabinetParameters): CabinetBuildResult {
   const ctx = computeCabinetContext(params);
-  const specs = CABINET_RULES.flatMap((rule) => rule.build(ctx));
+  const rules = params.boardOnly ? BOARD_RULES : CABINET_RULES;
+  const specs = rules.flatMap((rule) => rule.build(ctx));
   const parts = specs.map((spec, i) => specToPart(spec, params, i + 1));
-  return { parts, sections: ctx.sections };
+  return { parts, sections: params.boardOnly ? [] : ctx.sections };
 }
 
 export class CabinetEngine implements FurnitureEngine {

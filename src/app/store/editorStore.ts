@@ -41,7 +41,21 @@ import { documentsSignature, nextDocVersion } from '@/engines/drawing';
 import { runProductionCheck } from '@/engines/status';
 import type { ProjectIssue } from '@/engines/status';
 import { inferJointType } from '@/engines/machining';
-import { hardwareFromTemplate, type HardwareTemplate } from '@/core/model/hardwareCatalog';
+import { hardwareFromTemplate, type HardwareTemplate, catalogByCategory } from '@/core/model/hardwareCatalog';
+import {
+  instantiateTemplate,
+  planCabinetConnections,
+  findTemplate,
+  validateTemplateValues,
+  defaultValues,
+  loadCustomTemplates,
+  addCustomTemplate,
+  type TemplateValues,
+  type TemplateIssue,
+  type TemplateBinding,
+  type FurnitureTemplate,
+} from '@/engines/templates';
+import type { HardwareCategory } from '@/core/model/types';
 import { createAssembly, createFurniture, createPart, createProject } from '@/core/model/factory';
 import {
   findAssemblyOfPart,
@@ -122,6 +136,12 @@ export interface EditorState {
   // ── Параметрический шкаф ────────────────────────────────────────────────────
   createCabinet: (name?: string) => FurnitureId;
   updateCabinetParams: (id: FurnitureId, patch: Partial<CabinetParameters>) => void;
+
+  // ── Типовые конструкции (шаблоны) ──────────────────────────────────────────
+  createFromTemplate: (templateId: string, values?: TemplateValues, name?: string) => { ok: boolean; id?: FurnitureId; errors?: TemplateIssue[] };
+  updateTemplateValues: (id: FurnitureId, values: TemplateValues) => void;
+  detachTemplate: (id: FurnitureId) => void;
+  saveFurnitureAsTemplate: (id: FurnitureId, name: string) => FurnitureTemplate | null;
 
   // ── Детали ────────────────────────────────────────────────────────────────
   addPart: (input?: CreatePartInput) => PartId;
@@ -360,6 +380,166 @@ export const useEditorStore = create<EditorState>()(
           furniture.sections = built.sections;
           furniture.params = next as unknown as Record<string, unknown>;
         }),
+
+      createFromTemplate: (templateId, values, name) => {
+        const project = get().project;
+        const template = findTemplate(templateId, loadCustomTemplates());
+        if (!template) return { ok: false, errors: [{ severity: 'error', code: 'tpl.notFound', message: 'Шаблон не найден.' }] };
+        const vals = values ?? defaultValues(template);
+        const errors = validateTemplateValues(template, vals).filter((i) => i.severity === 'error');
+        if (errors.length > 0) return { ok: false, errors };
+
+        const body = project.materials.find((m) => m.kind === 'ldsp')?.id ?? project.materials[0]?.id ?? null;
+        const back = project.materials.find((m) => m.kind === 'other')?.id ?? body;
+        const { params } = instantiateTemplate(template, vals, { body, back, front: body });
+
+        const furniture = createFurniture(name ?? template.name);
+        furniture.type = 'cabinet';
+        furniture.assemblies = [createAssembly('Корпус')];
+        const built = buildCabinet(params);
+        furniture.assemblies[0].parts = built.parts;
+        furniture.sections = built.sections;
+        furniture.params = params as unknown as Record<string, unknown>;
+        const binding: TemplateBinding = { templateId, generator: template.generator, values: vals };
+        furniture.metadata = { ...(furniture.metadata ?? {}), template: binding };
+
+        // Резолвим фурнитуру по категориям и планируем соединения.
+        const newHardware: Hardware[] = [];
+        const resolveHardware = (category: HardwareCategory): HardwareId | null => {
+          const existing = project.hardware.find((h) => h.category === category)
+            ?? newHardware.find((h) => h.category === category);
+          if (existing) return existing.id;
+          const tpl = catalogByCategory(category)[0];
+          if (!tpl) return null;
+          const hw = hardwareFromTemplate(tpl);
+          newHardware.push(hw);
+          return hw.id;
+        };
+        const keyToPart = new Map<string, PartId>();
+        for (const part of built.parts) {
+          const k = part.metadata?.key as string | undefined;
+          if (k) keyToPart.set(k, part.id);
+        }
+        const connections: HardwareConnection[] = [];
+        for (const plan of planCabinetConnections(built.parts, params)) {
+          const hwId = resolveHardware(plan.category);
+          const aId = keyToPart.get(plan.aKey);
+          const bId = keyToPart.get(plan.bKey);
+          if (!hwId || !aId || !bId) continue;
+          const a = built.parts.find((x) => x.id === aId)!;
+          const b = built.parts.find((x) => x.id === bId)!;
+          connections.push({
+            id: newHardwareConnectionId(),
+            hardwareId: hwId,
+            partAId: aId,
+            partBId: bId,
+            jointType: inferJointType(a, b),
+            quantity: plan.quantity,
+            parameters: { gen: 'template' },
+          });
+        }
+
+        commit((p) => {
+          for (const hw of newHardware) p.hardware.push(hw);
+          p.furnitures.push(furniture);
+          for (const c of connections) p.hardwareConnections.push(c);
+        });
+        set((s) => void (s.activeFurnitureId = furniture.id));
+        return { ok: true, id: furniture.id };
+      },
+
+      updateTemplateValues: (id, values) =>
+        commit((p) => {
+          const furniture = findFurniture(p, id);
+          if (!furniture || furniture.type !== 'cabinet') return;
+          const binding = furniture.metadata?.template as TemplateBinding | undefined;
+          if (!binding || binding.detached) return;
+          const template = findTemplate(binding.templateId, loadCustomTemplates());
+          if (!template) return;
+          const merged = { ...binding.values, ...values };
+          const body = p.materials.find((m) => m.kind === 'ldsp')?.id ?? p.materials[0]?.id ?? null;
+          const back = p.materials.find((m) => m.kind === 'other')?.id ?? body;
+          const { params } = instantiateTemplate(template, merged, { body, back, front: body });
+          const assembly = furniture.assemblies[0];
+          const existing = assembly ? assembly.parts : [];
+          const built = rebuildCabinet(existing, params);
+          if (assembly) assembly.parts = built.parts;
+          furniture.sections = built.sections;
+          furniture.params = params as unknown as Record<string, unknown>;
+          furniture.metadata = { ...furniture.metadata, template: { ...binding, values: merged } };
+
+          // Пересобрать соединения, порождённые шаблоном (ручные — сохранить).
+          const partIds = new Set(built.parts.map((x) => x.id));
+          p.hardwareConnections = p.hardwareConnections.filter((c) => {
+            const isTemplateGen = (c.parameters as Record<string, unknown> | undefined)?.gen === 'template';
+            const belongs = partIds.has(c.partAId) || partIds.has(c.partBId);
+            return !(isTemplateGen && belongs);
+          });
+          const keyToPart = new Map<string, PartId>();
+          for (const part of built.parts) {
+            const k = part.metadata?.key as string | undefined;
+            if (k) keyToPart.set(k, part.id);
+          }
+          const resolveHardware = (category: HardwareCategory): HardwareId | null => {
+            const existingHw = p.hardware.find((h) => h.category === category);
+            if (existingHw) return existingHw.id;
+            const tpl = catalogByCategory(category)[0];
+            if (!tpl) return null;
+            const hw = hardwareFromTemplate(tpl);
+            p.hardware.push(hw);
+            return hw.id;
+          };
+          for (const plan of planCabinetConnections(built.parts, params)) {
+            const hwId = resolveHardware(plan.category);
+            const aId = keyToPart.get(plan.aKey);
+            const bId = keyToPart.get(plan.bKey);
+            if (!hwId || !aId || !bId) continue;
+            const a = built.parts.find((x) => x.id === aId)!;
+            const b = built.parts.find((x) => x.id === bId)!;
+            p.hardwareConnections.push({
+              id: newHardwareConnectionId(),
+              hardwareId: hwId, partAId: aId, partBId: bId,
+              jointType: inferJointType(a, b), quantity: plan.quantity,
+              parameters: { gen: 'template' },
+            });
+          }
+        }),
+
+      detachTemplate: (id) =>
+        commit((p) => {
+          const furniture = findFurniture(p, id);
+          if (!furniture) return;
+          const binding = furniture.metadata?.template as TemplateBinding | undefined;
+          if (!binding) return;
+          furniture.metadata = { ...furniture.metadata, template: { ...binding, detached: true } };
+        }),
+
+      saveFurnitureAsTemplate: (id, name) => {
+        const furniture = findFurniture(get().project, id);
+        if (!furniture || furniture.type !== 'cabinet') return null;
+        const params = readCabinetParameters(furniture.params);
+        const template: FurnitureTemplate = {
+          id: `tpl-user-${Date.now()}`,
+          name,
+          category: 'OTHER',
+          description: 'Пользовательский шаблон.',
+          generator: 'cabinet',
+          version: '1.0',
+          preview: '⭐',
+          builtin: false,
+          parameters: [
+            { id: 'width', name: 'Ширина', type: 'NUMBER', defaultValue: params.width, min: 50, max: 3000, step: 1, unit: 'мм', required: true },
+            { id: 'height', name: 'Высота', type: 'NUMBER', defaultValue: params.height, min: 50, max: 3000, step: 1, unit: 'мм', required: true },
+            { id: 'depth', name: 'Глубина', type: 'NUMBER', defaultValue: params.depth, min: 50, max: 3000, step: 1, unit: 'мм', required: true },
+            { id: 'materialThickness', name: 'Толщина', type: 'NUMBER', defaultValue: params.thickness, min: 8, max: 40, step: 1, unit: 'мм', required: true },
+            { id: 'shelfCount', name: 'Полки', type: 'NUMBER', defaultValue: params.shelves, min: 0, max: 12, step: 1, unit: 'шт', required: true },
+            { id: 'verticalPartitionCount', name: 'Перегородки', type: 'NUMBER', defaultValue: params.dividers, min: 0, max: 6, step: 1, unit: 'шт', required: true },
+            { id: 'doorCount', name: 'Фасады', type: 'NUMBER', defaultValue: params.doors, min: 0, max: 6, step: 1, unit: 'шт', required: true },
+          ],
+        };
+        addCustomTemplate(template);
+        return template;
+      },
 
       addPart: (input) => {
         const part = createPart(input);

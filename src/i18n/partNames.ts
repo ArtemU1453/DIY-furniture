@@ -10,7 +10,9 @@ export type PartType =
   | 'bottom'
   | 'shelf'
   | 'divider'
-  | 'back';
+  | 'back'
+  | 'facade'
+  | 'board';
 
 const RU: Record<PartType, string> = {
   side_left: 'Боковина левая',
@@ -20,15 +22,17 @@ const RU: Record<PartType, string> = {
   shelf: 'Полка',
   divider: 'Перегородка',
   back: 'Задняя стенка',
+  facade: 'Фасад',
+  board: 'Полка',
 };
 
 /**
  * Читаемое имя детали по типу и порядковому номеру.
- * Для нумеруемых типов (полка, перегородка) добавляется индекс.
+ * Для нумеруемых типов (полка, перегородка, фасад) добавляется индекс.
  */
 export function partTypeName(type: PartType, index?: number): string {
   const base = RU[type] ?? type;
-  if ((type === 'shelf' || type === 'divider') && index && index > 0) {
+  if ((type === 'shelf' || type === 'divider' || type === 'facade') && index && index > 0) {
     return `${base} ${index}`;
   }
   return base;
