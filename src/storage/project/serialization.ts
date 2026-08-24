@@ -6,7 +6,12 @@
  * структуры; несовместимые версии отклоняются с понятной ошибкой.
  */
 import { PROJECT_FORMAT_VERSION, type Project } from '@/core/model/types';
-import { DEFAULT_CUTTING_SETTINGS, DEFAULT_MACHINING_CONSTRAINTS } from '@/core/model/factory';
+import {
+  DEFAULT_CUTTING_SETTINGS,
+  DEFAULT_MACHINING_CONSTRAINTS,
+  createDefaultSheets,
+  makeCuttingSettings,
+} from '@/core/model/factory';
 
 export const PROJECT_FILE_EXTENSION = '.furniture.json';
 
@@ -54,8 +59,17 @@ export function deserializeProject(json: string): Project {
     project.machining = { constraints: { ...DEFAULT_MACHINING_CONSTRAINTS } };
   }
   if (!project.cutting || typeof project.cutting !== 'object') {
-    project.cutting = { settings: { ...DEFAULT_CUTTING_SETTINGS, trim: { ...DEFAULT_CUTTING_SETTINGS.trim }, sheetOverrides: {}, locked: [] } };
+    project.cutting = { settings: makeCuttingSettings() };
+  } else {
+    // Обратная совместимость: поля раскроя, добавленные на этапе 10.
+    project.cutting.settings = { ...makeCuttingSettings(), ...project.cutting.settings };
+    const s = project.cutting.settings;
+    if (!s.usableRemnant) s.usableRemnant = { ...DEFAULT_CUTTING_SETTINGS.usableRemnant };
+    if (!s.sheetSelection) s.sheetSelection = {};
   }
+  // Библиотеки листов и остатков (этап 10).
+  if (!Array.isArray(project.sheets)) project.sheets = createDefaultSheets(project.materials);
+  if (!Array.isArray(project.remnants)) project.remnants = [];
   if (!project.documents || typeof project.documents !== 'object') {
     project.documents = {};
   }

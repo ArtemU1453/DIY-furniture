@@ -3,10 +3,11 @@
  *
  * Учитывает: рабочую область листа (лист − технологическая обрезка), ширину
  * пропила (kerf), направление текстуры и запрет поворота, зафиксированные
- * вручную детали. Перебирает несколько стратегий сортировки и выбирает лучший
- * вариант (минимум листов, затем максимум использования). Детерминирован.
+ * вручную детали, переиспользуемые остатки (перед новыми листами) и
+ * ограниченный запас листов. Перебирает несколько стратегий сортировки (по
+ * режиму оптимизации) и выбирает лучший вариант. Детерминирован.
  *
- * Это «расчётный вариант», а не доказанный глобальный оптимум.
+ * Это «оптимизированный вариант», а не доказанный глобальный оптимум.
  */
 import type { CuttingEngine } from './CuttingEngine';
 import { getSortStrategy, SORT_STRATEGIES } from './sort';
@@ -19,8 +20,10 @@ import {
   type CuttingSheetResult,
   type Placement,
   type PieceRotation,
+  type UnplacedPiece,
 } from './types';
 import { extractRemnants } from './remnants';
+import { computeCutLines } from './cutlines';
 import { computeSheetStats, computeStatistics } from './metrics';
 
 interface Rect {
@@ -32,13 +35,16 @@ interface Rect {
 
 interface WorkSheet {
   index: number;
+  usable: Rect; // рабочая область именно этого листа
   free: Rect[];
   placements: Placement[];
+  fromRemnant: boolean;
+  sourceId?: string; // StoredRemnant.id для остатка
 }
 
 const EPS = 1e-6;
 
-function usableRect(input: CuttingInput): Rect {
+function fullUsableRect(input: CuttingInput): Rect {
   return {
     x: input.trim.left,
     y: input.trim.bottom,
@@ -61,7 +67,6 @@ function contains(a: Rect, b: Rect): boolean {
   return b.x >= a.x - EPS && b.y >= a.y - EPS && b.x + b.w <= a.x + a.w + EPS && b.y + b.h <= a.y + a.h + EPS;
 }
 
-/** Разбить свободный прямоугольник F вычитанием занятого O. */
 function splitFree(f: Rect, o: Rect): Rect[] {
   if (!overlaps(f, o)) return [f];
   const out: Rect[] = [];
@@ -79,7 +84,6 @@ function pruneFree(rects: Rect[]): Rect[] {
     let contained = false;
     for (let j = 0; j < kept.length; j++) {
       if (i !== j && contains(kept[j], kept[i])) {
-        // при равенстве оставляем только первый
         if (!contains(kept[i], kept[j]) || i > j) {
           contained = true;
           break;
@@ -91,7 +95,6 @@ function pruneFree(rects: Rect[]): Rect[] {
   return result;
 }
 
-/** Вычесть занятую область (с учётом пропила) из всех свободных прямоугольников. */
 function applyOccupied(sheet: WorkSheet, occ: Rect): void {
   const next: Rect[] = [];
   for (const f of sheet.free) next.push(...splitFree(f, occ));
@@ -158,81 +161,122 @@ function place(sheet: WorkSheet, piece: CuttingPieceInstance, x: number, y: numb
   applyOccupied(sheet, { x, y, w: w + kerf, h: h + kerf });
 }
 
+interface AttemptResult {
+  sheets: WorkSheet[];
+  unplaced: CuttingPieceInstance[];
+  stockExceeded: boolean;
+}
+
 /** Одна попытка укладки с заданной стратегией сортировки. */
-function packAttempt(input: CuttingInput, strategyId: string): { sheets: WorkSheet[]; unplaced: CuttingPieceInstance[] } {
-  const usable = usableRect(input);
+function packAttempt(input: CuttingInput, strategyId: string): AttemptResult {
+  const fullUsable = fullUsableRect(input);
   const respectGrain = input.options.respectGrain;
   const kerf = input.kerf;
   const byId = new Map(input.pieces.map((p) => [p.pieceId, p]));
+  const remnantSheets = input.remnantSheets ?? [];
+  const maxFull = input.availableQuantity && input.availableQuantity > 0 ? input.availableQuantity : Infinity;
 
   const sheets: WorkSheet[] = [];
-  const ensureSheet = (index: number): WorkSheet => {
+  let fullCount = 0;
+  let stockExceeded = false;
+
+  // Остатки — как предразмещённые листы фиксированного размера (индексы 0..R-1).
+  for (const rs of remnantSheets) {
+    const usable: Rect = { x: 0, y: 0, w: rs.length, h: rs.width };
+    sheets.push({ index: sheets.length, usable, free: [{ ...usable }], placements: [], fromRemnant: true, sourceId: rs.id });
+  }
+  const remnantCount = sheets.length;
+
+  const ensureFullSheet = (index: number): WorkSheet | null => {
     while (sheets.length <= index) {
-      sheets.push({ index: sheets.length, free: [{ ...usable }], placements: [] });
+      if (fullCount >= maxFull) {
+        stockExceeded = true;
+        return null;
+      }
+      sheets.push({ index: sheets.length, usable: { ...fullUsable }, free: [{ ...fullUsable }], placements: [], fromRemnant: false });
+      fullCount++;
     }
     return sheets[index];
   };
 
-  // 1) Зафиксированные вручную детали — сначала.
+  // 1) Зафиксированные вручную детали — сначала (на полные листы по индексу).
   const lockedIds = new Set<string>();
   for (const lp of input.locked ?? []) {
     const piece = byId.get(lp.pieceId);
     if (!piece) continue;
     const w = lp.rotation === 90 ? piece.width : piece.length;
     const h = lp.rotation === 90 ? piece.length : piece.width;
-    const sheet = ensureSheet(lp.sheetIndex);
+    const sheet = ensureFullSheet(remnantCount + lp.sheetIndex);
+    if (!sheet) continue;
     place(sheet, piece, lp.x, lp.y, w, h, lp.rotation, kerf, 'manual', true);
     lockedIds.add(lp.pieceId);
   }
 
-  // 2) Остальные детали — автоматически.
-  const remaining = getSortStrategy(strategyId).compare
-    ? [...input.pieces].filter((p) => !lockedIds.has(p.pieceId)).sort(getSortStrategy(strategyId).compare)
-    : input.pieces;
+  // 2) Остальные детали — автоматически (сначала на остатки, затем новые листы).
+  const remaining = [...input.pieces].filter((p) => !lockedIds.has(p.pieceId)).sort(getSortStrategy(strategyId).compare);
 
   const unplaced: CuttingPieceInstance[] = [];
   for (const piece of remaining) {
     let cand = findBest(sheets, piece, respectGrain);
     if (!cand) {
-      // Новый лист.
-      const sheet = ensureSheet(sheets.length);
+      const sheet = ensureFullSheet(sheets.length);
+      if (!sheet) {
+        unplaced.push(piece); // запас листов исчерпан
+        continue;
+      }
       cand = findBest([sheet], piece, respectGrain);
       if (!cand) {
         unplaced.push(piece); // не помещается даже на пустой лист
-        // удаляем только что созданный пустой лист, если он пуст
-        if (sheet.placements.length === 0) sheets.pop();
+        if (sheet.placements.length === 0 && !sheet.fromRemnant) {
+          sheets.pop();
+          fullCount--;
+        }
         continue;
       }
     }
     place(cand.sheet, piece, cand.x, cand.y, cand.w, cand.h, cand.rotation, kerf, 'automatic', false);
   }
 
-  return { sheets, unplaced };
+  // Убираем пустые остатки-листы (без размещений) из результата.
+  const nonEmpty = sheets.filter((s) => s.placements.length > 0);
+  nonEmpty.forEach((s, i) => (s.index = i));
+  return { sheets: nonEmpty, unplaced, stockExceeded };
 }
 
-function totalUtilization(sheets: WorkSheet[], usableArea: number): number {
-  if (sheets.length === 0) return 0;
-  const used = sheets.reduce((s, sh) => s + sh.placements.reduce((a, p) => a + p.length * p.width, 0), 0);
-  return used / (sheets.length * usableArea);
+function totalUsedArea(sheets: WorkSheet[]): number {
+  return sheets.reduce((s, sh) => s + sh.placements.reduce((a, p) => a + p.length * p.width, 0), 0);
+}
+function totalSheetArea(sheets: WorkSheet[]): number {
+  return sheets.reduce((s, sh) => s + sh.usable.w * sh.usable.h, 0);
+}
+
+/** Число попыток сортировки в зависимости от режима оптимизации. */
+function attemptsForMode(input: CuttingInput): number {
+  switch (input.options.optimizationMode) {
+    case 'FAST':
+      return 1;
+    case 'MAX_UTILIZATION':
+      return SORT_STRATEGIES.length;
+    case 'BALANCED':
+    default:
+      return Math.min(Math.max(2, input.options.attempts), SORT_STRATEGIES.length);
+  }
 }
 
 export class MaxRectsEngine implements CuttingEngine {
   readonly id = 'maxrects';
-  readonly name = 'MaxRects (расчётный вариант)';
+  readonly name = 'MaxRects (оптимизированный раскрой)';
 
   calculate(input: CuttingInput, controls?: CuttingRunControls): CuttingResult {
-    const usable = usableRect(input);
-    const usableArea = Math.max(0, usable.w) * Math.max(0, usable.h);
-    const attempts = Math.max(1, Math.min(input.options.attempts, SORT_STRATEGIES.length));
-
-    // Первая стратегия — заданная; далее остальные для поиска лучшего варианта.
+    const attempts = attemptsForMode(input);
     const order = [
       input.options.sortStrategy,
       ...SORT_STRATEGIES.map((s) => s.id).filter((id) => id !== input.options.sortStrategy),
     ].slice(0, attempts);
 
-    let best: { sheets: WorkSheet[]; unplaced: CuttingPieceInstance[] } | null = null;
-    let bestScore = { sheets: Infinity, util: -Infinity };
+    let best: AttemptResult | null = null;
+    // Оценка: меньше неразмещённых → меньше листов → выше использование.
+    let bestScore = { unplaced: Infinity, sheets: Infinity, util: -Infinity };
     let attemptsRun = 0;
 
     for (let i = 0; i < order.length; i++) {
@@ -241,45 +285,82 @@ export class MaxRectsEngine implements CuttingEngine {
 
       const attempt = packAttempt(input, order[i]);
       attemptsRun++;
+      const sheetArea = totalSheetArea(attempt.sheets) || 1;
       const score = {
-        sheets: attempt.sheets.length + attempt.unplaced.length * 1000, // неразмещённые — худший вариант
-        util: totalUtilization(attempt.sheets, usableArea || 1),
+        unplaced: attempt.unplaced.length,
+        sheets: attempt.sheets.length,
+        util: totalUsedArea(attempt.sheets) / sheetArea,
       };
-      if (score.sheets < bestScore.sheets || (score.sheets === bestScore.sheets && score.util > bestScore.util)) {
+      const better =
+        score.unplaced < bestScore.unplaced ||
+        (score.unplaced === bestScore.unplaced && score.sheets < bestScore.sheets) ||
+        (score.unplaced === bestScore.unplaced && score.sheets === bestScore.sheets && score.util > bestScore.util);
+      if (!best || better) {
         best = attempt;
         bestScore = score;
       }
     }
     controls?.onProgress?.({ fraction: 1, message: 'Готово' });
 
-    const chosen = best ?? { sheets: [], unplaced: input.pieces };
+    const chosen: AttemptResult = best ?? { sheets: [], unplaced: input.pieces, stockExceeded: false };
+    const criteria = input.options.usableRemnant;
 
     const sheetResults: CuttingSheetResult[] = chosen.sheets.map((sh) => {
-      const id = `${input.materialId}-sheet-${sh.index + 1}`;
-      const remnants = extractRemnants(sh.free, input.materialId, id, input.options.minRemnant);
+      const id = sh.fromRemnant
+        ? `${input.materialId}-remnant-${sh.sourceId ?? sh.index + 1}`
+        : `${input.materialId}-sheet-${sh.index + 1}`;
+      const usableArea = sh.usable.w * sh.usable.h;
+      const remnants = extractRemnants(sh.free, input.materialId, id, input.options.minRemnant, criteria);
       const stats = computeSheetStats(sh.placements, usableArea);
+      const geomLen = sh.fromRemnant ? sh.usable.w : input.sheet.length;
+      const geomWid = sh.fromRemnant ? sh.usable.h : input.sheet.width;
+      const trim = sh.fromRemnant ? { left: 0, right: 0, top: 0, bottom: 0 } : input.trim;
+      const cuts = computeCutLines(id, sh.placements, { length: geomLen, width: geomWid, trim }, input.kerf);
       return {
         id,
         materialId: input.materialId,
         index: sh.index,
-        length: input.sheet.length,
-        width: input.sheet.width,
-        trim: input.trim,
+        length: geomLen,
+        width: geomWid,
+        trim,
         placements: sh.placements,
         remnants,
+        cuts,
         usableAreaMm2: usableArea,
         usedAreaMm2: stats.used,
         wasteAreaMm2: stats.waste,
         utilization: stats.utilization,
+        sheetMaterialId: sh.fromRemnant ? sh.sourceId : input.sheetMaterialId,
+        fromRemnant: sh.fromRemnant,
       };
     });
+
+    const unplaced: UnplacedPiece[] = chosen.unplaced.map((p) => ({
+      pieceId: p.pieceId,
+      partId: p.partId,
+      name: p.name,
+      number: p.number,
+      length: p.length,
+      width: p.width,
+      reason: chosen.stockExceeded
+        ? 'Недостаточно материала (исчерпан запас листов).'
+        : 'Не найдено допустимое свободное пространство с учётом ограничений.',
+    }));
+
+    const warnings: string[] = [];
+    if (chosen.stockExceeded) {
+      warnings.push(
+        `Недостаточно листов в библиотеке для полного раскроя — не размещено ${unplaced.length} дет. Добавьте листы или увеличьте запас.`,
+      );
+    }
 
     return {
       materialId: input.materialId,
       sheets: sheetResults,
-      unplaced: chosen.unplaced,
-      statistics: computeStatistics(input.materialId, sheetResults, chosen.unplaced.length),
+      unplaced,
+      statistics: computeStatistics(input.materialId, sheetResults, unplaced.length),
       attemptsRun,
+      warnings,
     };
   }
 }

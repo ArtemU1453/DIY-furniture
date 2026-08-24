@@ -13,15 +13,26 @@ export type {
   LockedPlacement,
   Placement,
   CuttingRemnant,
+  CutLine,
   CuttingSheetResult,
   CuttingStatistics,
   CuttingResult,
+  UnplacedPiece,
   CuttingSettings,
   CuttingReport,
   CuttingState,
+  OptimizationMode,
+  UsableRemnantCriteria,
+  SheetMaterial,
+  StoredRemnant,
 } from '@/core/model/types';
 
-import type { LockedPlacement, TrimSettings } from '@/core/model/types';
+import type {
+  LockedPlacement,
+  TrimSettings,
+  OptimizationMode,
+  UsableRemnantCriteria,
+} from '@/core/model/types';
 
 /** Экземпляр детали для раскроя (разворачивается из Part по количеству). */
 export interface CuttingPieceInstance {
@@ -42,6 +53,15 @@ export interface CuttingOptions {
   attempts: number;
   sortStrategy: string;
   minRemnant: Mm;
+  optimizationMode: OptimizationMode;
+  usableRemnant: UsableRemnantCriteria;
+}
+
+/** Переиспользуемый остаток как «лист» ограниченного размера. */
+export interface RemnantSheet {
+  id: string; // StoredRemnant.id
+  length: Mm;
+  width: Mm;
 }
 
 /** Вход раскроя ОДНОГО материала. */
@@ -49,6 +69,12 @@ export interface CuttingInput {
   materialId: MaterialId;
   pieces: CuttingPieceInstance[];
   sheet: { length: Mm; width: Mm };
+  /** Идентификатор формата листа из библиотеки (для отчёта). */
+  sheetMaterialId?: string;
+  /** Ограниченный запас основных листов (0/undefined — без ограничения). */
+  availableQuantity?: number;
+  /** Переиспользуемые остатки (используются перед новыми листами). */
+  remnantSheets?: RemnantSheet[];
   kerf: Mm;
   trim: TrimSettings;
   options: CuttingOptions;

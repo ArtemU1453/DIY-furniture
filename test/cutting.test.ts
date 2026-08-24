@@ -29,7 +29,7 @@ function input(pieces: CuttingPieceInstance[], over: Partial<CuttingInput> = {})
     sheet: { length: 2750, width: 1830 },
     kerf: 3.2,
     trim: { left: 10, right: 10, top: 10, bottom: 10 },
-    options: { respectGrain: true, attempts: 1, sortStrategy: 'area', minRemnant: 150 },
+    options: { respectGrain: true, attempts: 1, sortStrategy: 'area', minRemnant: 150, optimizationMode: 'FAST', usableRemnant: { minWidth: 100, minLength: 300, minArea: 60000 } },
     ...over,
   };
 }
@@ -67,9 +67,9 @@ describe('CuttingEngine (MaxRects)', () => {
 
   it('Test 6: направление текстуры запрещает поворот', () => {
     const grained = piece('a', 1500, 500, { grain: 'length' });
-    const respected = engine.calculate(input([grained], { sheet: { length: 1000, width: 2000 }, options: { respectGrain: true, attempts: 1, sortStrategy: 'area', minRemnant: 150 } }));
+    const respected = engine.calculate(input([grained], { sheet: { length: 1000, width: 2000 }, options: { respectGrain: true, attempts: 1, sortStrategy: 'area', minRemnant: 150, optimizationMode: 'FAST', usableRemnant: { minWidth: 100, minLength: 300, minArea: 60000 } } }));
     expect(respected.unplaced).toHaveLength(1); // текстуру нельзя развернуть
-    const ignored = engine.calculate(input([grained], { sheet: { length: 1000, width: 2000 }, options: { respectGrain: false, attempts: 1, sortStrategy: 'area', minRemnant: 150 } }));
+    const ignored = engine.calculate(input([grained], { sheet: { length: 1000, width: 2000 }, options: { respectGrain: false, attempts: 1, sortStrategy: 'area', minRemnant: 150, optimizationMode: 'FAST', usableRemnant: { minWidth: 100, minLength: 300, minArea: 60000 } } }));
     expect(ignored.unplaced).toHaveLength(0);
   });
 
@@ -126,8 +126,8 @@ describe('CuttingEngine (MaxRects)', () => {
 
   it('Test 17: детерминированность — одинаковый вход даёт одинаковый результат', () => {
     const pieces = Array.from({ length: 15 }, (_, i) => piece(`p${i}`, 600 + i * 10, 400));
-    const r1 = engine.calculate(input(pieces, { options: { respectGrain: true, attempts: 4, sortStrategy: 'area', minRemnant: 150 } }));
-    const r2 = engine.calculate(input(pieces, { options: { respectGrain: true, attempts: 4, sortStrategy: 'area', minRemnant: 150 } }));
+    const r1 = engine.calculate(input(pieces, { options: { respectGrain: true, attempts: 4, sortStrategy: 'area', minRemnant: 150, optimizationMode: 'FAST', usableRemnant: { minWidth: 100, minLength: 300, minArea: 60000 } } }));
+    const r2 = engine.calculate(input(pieces, { options: { respectGrain: true, attempts: 4, sortStrategy: 'area', minRemnant: 150, optimizationMode: 'FAST', usableRemnant: { minWidth: 100, minLength: 300, minArea: 60000 } } }));
     expect(JSON.stringify(r1)).toBe(JSON.stringify(r2));
   });
 });

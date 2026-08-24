@@ -19,6 +19,8 @@ export type HardwareId = Id<'Hardware'>;
 export type HardwareConnectionId = Id<'HardwareConnection'>;
 export type MachiningId = Id<'MachiningOperation'>;
 export type DrawingId = Id<'Drawing'>;
+export type SheetMaterialId = Id<'SheetMaterial'>;
+export type StoredRemnantId = Id<'StoredRemnant'>;
 
 export function newProjectId(): ProjectId {
   return uuid() as ProjectId;
@@ -49,4 +51,10 @@ export function newMachiningId(): MachiningId {
 }
 export function newDrawingId(): DrawingId {
   return uuid() as DrawingId;
+}
+export function newSheetMaterialId(): SheetMaterialId {
+  return uuid() as SheetMaterialId;
+}
+export function newStoredRemnantId(): StoredRemnantId {
+  return uuid() as StoredRemnantId;
 }

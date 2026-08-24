@@ -12,6 +12,7 @@ import {
   newMaterialId,
   newPartId,
   newProjectId,
+  newSheetMaterialId,
 } from './ids';
 import {
   PROJECT_FORMAT_VERSION,
@@ -27,6 +28,7 @@ import {
   type PartRole,
   type Project,
   type ProjectSettings,
+  type SheetMaterial,
 } from './types';
 
 export const DEFAULT_SETTINGS: ProjectSettings = {
@@ -54,7 +56,24 @@ export const DEFAULT_CUTTING_SETTINGS: CuttingSettings = {
   trim: { left: 10, right: 10, top: 10, bottom: 10 },
   sheetOverrides: {},
   locked: [],
+  optimizationMode: 'BALANCED',
+  algorithm: 'maxrects',
+  usableRemnant: { minWidth: 100, minLength: 300, minArea: 60_000 },
+  useRemnants: false,
+  sheetSelection: {},
 };
+
+/** Полные настройки раскроя со значениями по умолчанию (для миграции). */
+export function makeCuttingSettings(): CuttingSettings {
+  return {
+    ...DEFAULT_CUTTING_SETTINGS,
+    trim: { ...DEFAULT_CUTTING_SETTINGS.trim },
+    usableRemnant: { ...DEFAULT_CUTTING_SETTINGS.usableRemnant },
+    sheetOverrides: {},
+    sheetSelection: {},
+    locked: [],
+  };
+}
 
 /** Встроенный минимальный каталог материалов (ЛДСП). */
 export function createDefaultMaterial(): Material {
@@ -114,6 +133,25 @@ export function createStandardMaterials(): Material[] {
     mk('МДФ 16 мм', 'mdf', 16, { length: 2800, width: 2070 }, '#d9c7a8', 750),
     mk('ХДФ 3 мм Белый', 'other', 3, { length: 2745, width: 1700 }, '#e9e6df', 800),
   ];
+}
+
+/**
+ * Библиотека форматов листов по умолчанию — по одному формату на каждый
+ * материал (габарит листа берётся из материала). availableQuantity=0 —
+ * запас не ограничен.
+ */
+export function createDefaultSheets(materials: Material[]): SheetMaterial[] {
+  return materials.map((m) => ({
+    id: newSheetMaterialId(),
+    materialId: m.id,
+    name: `${m.name} · ${m.sheet.length}×${m.sheet.width}`,
+    width: m.sheet.width,
+    height: m.sheet.length,
+    thickness: m.thickness,
+    grainDirection: m.grain,
+    availableQuantity: 0,
+    source: 'library',
+  }));
 }
 
 /** Встроенные варианты кромки (0.4 / 1 / 2 мм). */
@@ -264,7 +302,9 @@ export function createProject(input: CreateProjectInput = {}): Project {
     hardware: createDefaultHardware(),
     hardwareConnections: [],
     machining: { constraints: { ...DEFAULT_MACHINING_CONSTRAINTS } },
-    cutting: { settings: { ...DEFAULT_CUTTING_SETTINGS, trim: { ...DEFAULT_CUTTING_SETTINGS.trim }, sheetOverrides: {}, locked: [] } },
+    cutting: { settings: makeCuttingSettings() },
+    sheets: createDefaultSheets(materials),
+    remnants: [],
     documents: {},
     furnitures: [furniture],
   };
