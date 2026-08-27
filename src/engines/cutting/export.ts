@@ -106,3 +106,57 @@ export function reportToCsv(report: CuttingReport, thicknessById?: Record<string
 export function reportToJson(report: CuttingReport): string {
   return JSON.stringify(report, null, 2);
 }
+
+/**
+ * cutting_parts.csv (§54) — размещение деталей по листам.
+ * Стабильные колонки: Sheet, Part ID, Name, Width, Height, Thickness,
+ * Material, X, Y, Rotation, Quantity.
+ */
+export function cuttingPartsCsv(report: CuttingReport, thicknessById?: Record<string, number>): string {
+  const header = ['Sheet', 'Part ID', 'Name', 'Width', 'Height', 'Thickness', 'Material', 'X', 'Y', 'Rotation', 'Quantity'];
+  const rows: string[][] = [];
+  for (const job of report.jobs) {
+    const th = thicknessById?.[job.materialId as string];
+    for (const sheet of job.sheets) {
+      for (const p of sheet.placements) {
+        rows.push([
+          `${sheet.index + 1}${sheet.fromRemnant ? ' (remnant)' : ''}`,
+          p.number, p.name,
+          String(Math.round(p.length)), String(Math.round(p.width)),
+          th != null ? String(th) : '',
+          job.statistics.materialName,
+          String(Math.round(p.x)), String(Math.round(p.y)), String(p.rotation),
+          '1',
+        ]);
+      }
+    }
+  }
+  const q = (s: string) => (/[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  return [header, ...rows].map((r) => r.map(q).join(',')).join('\n');
+}
+
+/**
+ * waste_report.csv (§55) — отчёт по отходам и остаткам на каждый лист.
+ * Колонки: Sheet, Material, SheetArea, PartArea, RemnantArea, WasteArea, Efficiency.
+ * Площади в м², эффективность в процентах.
+ */
+export function wasteReportCsv(report: CuttingReport): string {
+  const header = ['Sheet', 'Material', 'SheetArea', 'PartArea', 'RemnantArea', 'WasteArea', 'Efficiency'];
+  const m2 = (mm2: number) => (mm2 / 1_000_000).toFixed(3);
+  const rows: string[][] = [];
+  for (const job of report.jobs) {
+    for (const sheet of job.sheets) {
+      rows.push([
+        `${sheet.index + 1}${sheet.fromRemnant ? ' (remnant)' : ''}`,
+        job.statistics.materialName,
+        m2(sheet.usableAreaMm2),
+        m2(sheet.usedAreaMm2),
+        m2(sheet.remnantAreaMm2 ?? 0),
+        m2(sheet.wasteAreaMm2),
+        `${(sheet.utilization * 100).toFixed(1)}%`,
+      ]);
+    }
+  }
+  const q = (s: string) => (/[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  return [header, ...rows].map((r) => r.map(q).join(',')).join('\n');
+}

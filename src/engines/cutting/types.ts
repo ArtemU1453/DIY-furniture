@@ -73,6 +73,8 @@ export interface CuttingInput {
   sheetMaterialId?: string;
   /** Ограниченный запас основных листов (0/undefined — без ограничения). */
   availableQuantity?: number;
+  /** Альтернативные форматы листа (по убыванию приоритета) — §23/§24. */
+  alternateSheets?: Array<{ id: string; length: Mm; width: Mm; availableQuantity: number }>;
   /** Переиспользуемые остатки (используются перед новыми листами). */
   remnantSheets?: RemnantSheet[];
   kerf: Mm;

@@ -25,6 +25,7 @@ import {
 import { extractRemnants } from './remnants';
 import { computeCutLines } from './cutlines';
 import { computeSheetStats, computeStatistics } from './metrics';
+import { sheetFormats, formatForPiece, type SheetFormat } from './formats';
 
 interface Rect {
   x: number;
@@ -39,19 +40,12 @@ interface WorkSheet {
   free: Rect[];
   placements: Placement[];
   fromRemnant: boolean;
-  sourceId?: string; // StoredRemnant.id для остатка
+  sourceId?: string;
+  /** Формат листа (может отличаться от предпочтительного — §23). */
+  fmt?: SheetFormat; // StoredRemnant.id для остатка
 }
 
 const EPS = 1e-6;
-
-function fullUsableRect(input: CuttingInput): Rect {
-  return {
-    x: input.trim.left,
-    y: input.trim.bottom,
-    w: input.sheet.length - input.trim.left - input.trim.right,
-    h: input.sheet.width - input.trim.top - input.trim.bottom,
-  };
-}
 
 function canRotate(piece: CuttingPieceInstance, respectGrain: boolean): boolean {
   if (!piece.allowRotate) return false;
@@ -169,7 +163,6 @@ interface AttemptResult {
 
 /** Одна попытка укладки с заданной стратегией сортировки. */
 function packAttempt(input: CuttingInput, strategyId: string): AttemptResult {
-  const fullUsable = fullUsableRect(input);
   const respectGrain = input.options.respectGrain;
   const kerf = input.kerf;
   const byId = new Map(input.pieces.map((p) => [p.pieceId, p]));
@@ -187,13 +180,18 @@ function packAttempt(input: CuttingInput, strategyId: string): AttemptResult {
   }
   const remnantCount = sheets.length;
 
-  const ensureFullSheet = (index: number): WorkSheet | null => {
+  const formats = sheetFormats(input);
+  /** Создать лист под деталь: формат подбирается по приоритету (§23/§24). */
+  const ensureFullSheet = (index: number, piece?: CuttingPieceInstance): WorkSheet | null => {
     while (sheets.length <= index) {
       if (fullCount >= maxFull) {
         stockExceeded = true;
         return null;
       }
-      sheets.push({ index: sheets.length, usable: { ...fullUsable }, free: [{ ...fullUsable }], placements: [], fromRemnant: false });
+      const rotatable = piece ? canRotate(piece, respectGrain) : false;
+      const fmt = piece ? formatForPiece(formats, piece, rotatable) : formats[0];
+      const usable = { ...fmt.usable };
+      sheets.push({ index: sheets.length, usable, free: [{ ...usable }], placements: [], fromRemnant: false, fmt });
       fullCount++;
     }
     return sheets[index];
@@ -219,7 +217,7 @@ function packAttempt(input: CuttingInput, strategyId: string): AttemptResult {
   for (const piece of remaining) {
     let cand = findBest(sheets, piece, respectGrain);
     if (!cand) {
-      const sheet = ensureFullSheet(sheets.length);
+      const sheet = ensureFullSheet(sheets.length, piece);
       if (!sheet) {
         unplaced.push(piece); // запас листов исчерпан
         continue;
@@ -311,9 +309,14 @@ export class MaxRectsEngine implements CuttingEngine {
         : `${input.materialId}-sheet-${sh.index + 1}`;
       const usableArea = sh.usable.w * sh.usable.h;
       const remnants = extractRemnants(sh.free, input.materialId, id, input.options.minRemnant, criteria);
-      const stats = computeSheetStats(sh.placements, usableArea);
-      const geomLen = sh.fromRemnant ? sh.usable.w : input.sheet.length;
-      const geomWid = sh.fromRemnant ? sh.usable.h : input.sheet.width;
+      // Полезные остатки (REMNANT) отделяются от безвозвратного отхода (WASTE).
+      const remnantArea = remnants.filter((r) => r.usable).reduce((a, r) => a + r.area, 0);
+      const stats = computeSheetStats(sh.placements, usableArea, remnantArea);
+      // Порядок реза: слева направо, снизу вверх (задел под оптимизатор реза).
+      const ordered = [...sh.placements].sort((a, b) => a.y - b.y || a.x - b.x);
+      ordered.forEach((pl, i) => { pl.cutOrder = i + 1; });
+      const geomLen = sh.fromRemnant ? sh.usable.w : (sh.fmt?.length ?? input.sheet.length);
+      const geomWid = sh.fromRemnant ? sh.usable.h : (sh.fmt?.width ?? input.sheet.width);
       const trim = sh.fromRemnant ? { left: 0, right: 0, top: 0, bottom: 0 } : input.trim;
       const cuts = computeCutLines(id, sh.placements, { length: geomLen, width: geomWid, trim }, input.kerf);
       return {
@@ -328,9 +331,10 @@ export class MaxRectsEngine implements CuttingEngine {
         cuts,
         usableAreaMm2: usableArea,
         usedAreaMm2: stats.used,
+        remnantAreaMm2: stats.remnant,
         wasteAreaMm2: stats.waste,
         utilization: stats.utilization,
-        sheetMaterialId: sh.fromRemnant ? sh.sourceId : input.sheetMaterialId,
+        sheetMaterialId: sh.fromRemnant ? sh.sourceId : (sh.fmt?.id ?? input.sheetMaterialId),
         fromRemnant: sh.fromRemnant,
       };
     });

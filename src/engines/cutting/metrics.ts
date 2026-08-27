@@ -10,15 +10,26 @@ export function placementsArea(placements: Placement[]): number {
   return placements.reduce((a, p) => a + p.length * p.width, 0);
 }
 
-export function computeSheetStats(placements: Placement[], usableAreaMm2: number): {
+/**
+ * Показатели листа. Свободная площадь делится на ПОЛЕЗНЫЕ остатки (REMNANT,
+ * пригодны к повторному использованию) и безвозвратный ОТХОД (WASTE).
+ */
+export function computeSheetStats(
+  placements: Placement[],
+  usableAreaMm2: number,
+  remnantAreaMm2 = 0,
+): {
   used: number;
+  remnant: number;
   waste: number;
   utilization: number;
 } {
   const used = placementsArea(placements);
-  const waste = Math.max(0, usableAreaMm2 - used);
+  const free = Math.max(0, usableAreaMm2 - used);
+  const remnant = Math.min(Math.max(0, remnantAreaMm2), free);
+  const waste = Math.max(0, free - remnant);
   const utilization = usableAreaMm2 > 0 ? used / usableAreaMm2 : 0;
-  return { used, waste, utilization };
+  return { used, remnant, waste, utilization };
 }
 
 export function computeStatistics(
@@ -30,7 +41,8 @@ export function computeStatistics(
   const pieceCount = sheets.reduce((n, s) => n + s.placements.length, 0);
   const piecesAreaMm2 = sheets.reduce((a, s) => a + s.usedAreaMm2, 0);
   const sheetsUsableAreaMm2 = sheets.reduce((a, s) => a + s.usableAreaMm2, 0);
-  const wasteAreaMm2 = Math.max(0, sheetsUsableAreaMm2 - piecesAreaMm2);
+  const remnantAreaMm2 = sheets.reduce((a, s) => a + (s.remnantAreaMm2 ?? 0), 0);
+  const wasteAreaMm2 = Math.max(0, sheetsUsableAreaMm2 - piecesAreaMm2 - remnantAreaMm2);
   const utilization = sheetsUsableAreaMm2 > 0 ? piecesAreaMm2 / sheetsUsableAreaMm2 : 0;
   return {
     materialId,
@@ -39,6 +51,7 @@ export function computeStatistics(
     sheetCount: sheets.length,
     piecesAreaMm2,
     sheetsUsableAreaMm2,
+    remnantAreaMm2,
     wasteAreaMm2,
     utilization,
   };

@@ -1,6 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '@/app/store/editorStore';
-import { isCuttingStale, m2, reportToCsv, reportToJson, resultToSvg, sheetToSvg } from '@/engines/cutting';
+import {
+  isCuttingStale, m2, reportToCsv, reportToJson, resultToSvg, sheetToSvg,
+  cuttingPartsCsv, wasteReportCsv, compareAlgorithms, listCuttingEngines,
+  type AlgorithmComparisonRow,
+} from '@/engines/cutting';
 import { SORT_STRATEGIES } from '@/engines/cutting';
 import { printPages, downloadSvg } from '@/features/documents/print';
 import { allParts } from '@/core/model/selectors';
@@ -28,7 +32,7 @@ const MODE_LABELS: Record<OptimizationMode, string> = {
   MAX_UTILIZATION: 'Макс. использование',
 };
 
-export function CuttingView() {
+export function CuttingView({ onOpenDrawing }: { onOpenDrawing?: (partId: PartId) => void } = {}) {
   const project = useEditorStore((s) => s.project);
   const running = useEditorStore((s) => s.cuttingRunning);
   const progress = useEditorStore((s) => s.cuttingProgress);
@@ -44,6 +48,7 @@ export function CuttingView() {
   const rotatePlacement = useEditorStore((s) => s.rotatePlacement);
   const updateSettings = useEditorStore((s) => s.updateCuttingSettings);
   const saveRemnants = useEditorStore((s) => s.saveUsableRemnantsFromResult);
+  const applyReport = useEditorStore((s) => s.applyCuttingReport);
 
   const [filter, setFilter] = useState<'all' | MaterialId>('all');
   const [mode, setMode] = useState<'auto' | 'manual'>('auto');
@@ -51,6 +56,7 @@ export function CuttingView() {
   const [sheetLibOpen, setSheetLibOpen] = useState(false);
   const [remnantLibOpen, setRemnantLibOpen] = useState(false);
   const mapRef = useRef<CuttingMapHandle>(null);
+  const [comparison, setComparison] = useState<AlgorithmComparisonRow[] | null>(null);
 
   const report = project.cutting.report;
   const stale = isCuttingStale(project);
@@ -97,6 +103,27 @@ export function CuttingView() {
     void recalc();
   };
 
+  /**
+   * Пересчёт с предупреждением: ручные корректировки (зафиксированные детали)
+   * сохраняются, но пользователь должен знать, что раскладка изменится (§42).
+   */
+  const onRecalculate = () => {
+    if (settings.locked.length > 0) {
+      const ok = window.confirm(
+        `Есть ручные корректировки (${settings.locked.length}). Автоматический раскрой изменит раскладку остальных деталей. Зафиксированные детали останутся на местах. Продолжить?`,
+      );
+      if (!ok) return;
+    }
+    setComparison(null);
+    void recalc();
+  };
+
+  /** Рассчитать несколькими алгоритмами и показать сравнение (§18/§50). */
+  const onCompare = () => {
+    const rows = compareAlgorithms(project, { preferFewerSheets: settings.preferFewerSheets });
+    setComparison(rows);
+  };
+
   const grainOf = (p: Placement) => partsById.get(p.partId)?.grain ?? 'none';
   const edgesOf = (p: Placement): EdgeFlags | undefined => {
     const part = partsById.get(p.partId);
@@ -112,6 +139,35 @@ export function CuttingView() {
     if (!target) return;
     downloadSvg(`Раскрой_${target.statistics.materialName}`, resultToSvg(target));
   };
+  // PNG карты раскроя: рендер SVG в canvas (только карта, без интерфейса).
+  const exportPng = () => {
+    const target = jobs[0];
+    if (!target) return;
+    const svg = resultToSvg(target);
+    const img = new Image();
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width || 1600;
+      canvas.height = img.height || 1200;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#0f1012';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/png');
+        a.download = 'cutting.png';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  };
+
   const exportPdf = () => {
     const pages = jobs.flatMap((j) => j.sheets.map((s) => sheetToSvg(s, j.statistics.materialName)));
     if (pages.length === 0) return;
@@ -143,7 +199,7 @@ export function CuttingView() {
           <option value="manual" disabled={filter === 'all'}>Ручной</option>
         </select>
         {!running ? (
-          <button onClick={() => void recalc()}>Пересчитать</button>
+          <button onClick={onRecalculate}>Пересчитать</button>
         ) : (
           <button onClick={cancel} style={{ color: 'var(--danger)' }}>Отменить расчёт</button>
         )}
@@ -153,9 +209,14 @@ export function CuttingView() {
         <button onClick={() => mapRef.current?.fit()} disabled={!report}>По экрану</button>
         <button onClick={() => mapRef.current?.reset100()} disabled={!report}>100%</button>
         <span className="sep" />
+        <button onClick={onCompare} disabled={running}>Сравнить алгоритмы</button>
+        <span className="sep" />
         <button onClick={exportSvg} disabled={!report}>SVG</button>
+        <button onClick={exportPng} disabled={!report}>PNG</button>
         <button onClick={exportPdf} disabled={!report}>PDF</button>
         <button onClick={() => report && download('cutting.csv', reportToCsv(report, thicknessById), 'text/csv')} disabled={!report}>CSV</button>
+        <button onClick={() => report && download('cutting_parts.csv', cuttingPartsCsv(report, thicknessById), 'text/csv')} disabled={!report} title="cutting_parts.csv">Детали CSV</button>
+        <button onClick={() => report && download('waste_report.csv', wasteReportCsv(report), 'text/csv')} disabled={!report} title="waste_report.csv">Отходы CSV</button>
         <button onClick={() => report && download('cutting.json', reportToJson(report), 'application/json')} disabled={!report}>JSON</button>
         <span style={{ marginLeft: 'auto' }} />
         <button onClick={() => setSheetLibOpen(true)}>Листы…</button>
@@ -168,9 +229,18 @@ export function CuttingView() {
       {showSettings && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 10px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', fontSize: 12 }}>
           <label style={lbl}>Алгоритм
+            <select style={{ width: 'auto' }} value={settings.algorithm} onChange={(e) => updateSettings({ algorithm: e.target.value })}>
+              {listCuttingEngines().map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          </label>
+          <label style={lbl}>Режим
             <select style={{ width: 'auto' }} value={settings.optimizationMode} onChange={(e) => updateSettings({ optimizationMode: e.target.value as OptimizationMode })}>
               {(Object.keys(MODE_LABELS) as OptimizationMode[]).map((m) => <option key={m} value={m}>{MODE_LABELS[m]}</option>)}
             </select>
+          </label>
+          <label style={{ ...lbl, gap: 4 }}>
+            <input type="checkbox" checked={settings.preferFewerSheets} onChange={(e) => updateSettings({ preferFewerSheets: e.target.checked })} />
+            Меньше листов
           </label>
           <label style={lbl}>Сортировка
             <select style={{ width: 'auto' }} value={settings.sortStrategy} onChange={(e) => updateSettings({ sortStrategy: e.target.value })}>
@@ -218,6 +288,39 @@ export function CuttingView() {
           Раскрой устарел — модель изменилась. Нажмите «Пересчитать».
         </div>
       )}
+      {comparison && comparison.length > 0 && (
+        <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+            <strong style={{ fontSize: 12 }}>Сравнение алгоритмов</strong>
+            <button style={{ marginLeft: 'auto' }} onClick={() => setComparison(null)}>✕</button>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ textAlign: 'left', color: 'var(--text-dim)' }}>
+                <th>Алгоритм</th><th>Листов</th><th>Не размещено</th><th>Остатки</th><th>Отход</th><th>КПД</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {comparison.map((row) => (
+                <tr key={row.algorithmId} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td>{row.algorithmName}</td>
+                  <td>{row.sheetCount}</td>
+                  <td style={row.unplacedCount > 0 ? { color: 'var(--danger)' } : undefined}>{row.unplacedCount}</td>
+                  <td>{m2(row.remnantAreaMm2)} м²</td>
+                  <td>{(row.wasteRatio * 100).toFixed(1)}%</td>
+                  <td>{(row.efficiency * 100).toFixed(1)}%</td>
+                  <td>
+                    <button onClick={() => { applyReport(row.report, row.algorithmId); setComparison(null); }}>
+                      Выбрать
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {warnings.map((w, i) => (
         <div key={i} style={{ padding: '6px 10px', background: 'rgba(230,120,60,0.15)', color: '#e8a06a', borderBottom: '1px solid var(--border)' }}>{w}</div>
       ))}
@@ -233,8 +336,9 @@ export function CuttingView() {
               <Row k="Листов" v={String(job.statistics.sheetCount)} />
               <Row k="Площадь деталей" v={`${m2(job.statistics.piecesAreaMm2)} м²`} />
               <Row k="Площадь листов (раб.)" v={`${m2(job.statistics.sheetsUsableAreaMm2)} м²`} />
-              <Row k="Отход" v={`${m2(job.statistics.wasteAreaMm2)} м²`} />
-              <Row k="Полезные остатки" v={String(job.sheets.reduce((n, s) => n + s.remnants.filter((r) => r.usable).length, 0))} />
+              <Row k="Отход (WASTE)" v={`${m2(job.statistics.wasteAreaMm2)} м²`} />
+              <Row k="Остатки (REMNANT)" v={`${m2(job.statistics.remnantAreaMm2)} м²`} />
+              <Row k="Полезных остатков" v={String(job.sheets.reduce((n, s) => n + s.remnants.filter((r) => r.usable).length, 0))} />
               <Row k="Использование" v={`${(job.statistics.utilization * 100).toFixed(1)}%`} />
               <div className="dim" style={{ marginTop: 4, fontSize: 11 }}>Оптимизированный раскрой ({job.attemptsRun} попыток)</div>
               {job.unplaced.length > 0 && (
@@ -302,6 +406,12 @@ export function CuttingView() {
                 style={isLocked ? { borderColor: 'var(--accent)' } : undefined}
               >{isLocked ? 'Разблокировать' : 'Заблокировать'}</button>
             </div>
+            {/* Связь с чертежом и 3D — по общему partId (§33/§34). */}
+            <button
+              style={{ width: '100%', marginTop: 6 }}
+              onClick={() => { selectPart(selectedPlacement.partId); onOpenDrawing?.(selectedPlacement.partId); }}
+            >Открыть чертёж детали</button>
+            <Row k="Порядок реза" v={selectedPlacement.cutOrder != null ? String(selectedPlacement.cutOrder) : '—'} />
           </aside>
         )}
       </div>

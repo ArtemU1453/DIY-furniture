@@ -325,6 +325,8 @@ export interface Placement {
   rotation: PieceRotation;
   origin: PlacementOrigin;
   locked: boolean;
+  /** Порядок реза на листе (1..N). Задел под будущий оптимизатор реза/CNC. */
+  cutOrder?: number;
 }
 
 /** Прямоугольный остаток листа. `usable` — годен по критериям полезного остатка. */
@@ -362,6 +364,9 @@ export interface CuttingSheetResult {
   cuts: CutLine[];
   usableAreaMm2: number;
   usedAreaMm2: number;
+  /** Площадь ПОЛЕЗНЫХ остатков (REMNANT) — пригодны к повторному использованию. */
+  remnantAreaMm2: number;
+  /** Площадь безвозвратного отхода (WASTE) = usable − used − remnant. */
   wasteAreaMm2: number;
   utilization: number;
   /** Источник листа: формат из библиотеки или переиспользованный остаток. */
@@ -376,6 +381,9 @@ export interface CuttingStatistics {
   sheetCount: number;
   piecesAreaMm2: number;
   sheetsUsableAreaMm2: number;
+  /** Полезные остатки (REMNANT), мм². */
+  remnantAreaMm2: number;
+  /** Безвозвратный отход (WASTE), мм². */
   wasteAreaMm2: number;
   utilization: number;
 }
@@ -428,6 +436,23 @@ export interface CuttingSettings {
   useRemnants: boolean;
   /** Выбранный формат листа из библиотеки на материал (SheetMaterial.id). */
   sheetSelection: Record<string, string>;
+  /**
+   * Приоритет форматов листа на материал: список SheetMaterial.id по убыванию
+   * предпочтения. Пустой список — использовать sheetSelection/все доступные.
+   */
+  sheetPriority: Record<string, string[]>;
+  /** Стратегия: меньше листов (по умолчанию) или выше использование материала. */
+  preferFewerSheets: boolean;
+}
+
+/**
+ * Траектория реза — АДАПТЕР под будущий оптимизатор/CNC. Сейчас не
+ * рассчитывается: сохраняется только порядок реза (Placement.cutOrder).
+ * CNC/G-code в этом этапе НЕ реализуется.
+ */
+export interface CuttingPath {
+  sheetId: string;
+  segments: Array<{ x1: Mm; y1: Mm; x2: Mm; y2: Mm; order: number }>;
 }
 
 /** Формат листа в библиотеке (SheetLibrary). Ссылается на материал. */
