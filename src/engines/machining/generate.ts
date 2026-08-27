@@ -8,6 +8,7 @@
 import type { MachiningOperation, MachiningOverride, Part, Project } from '@/core/model/types';
 import { allParts, findPart } from '@/core/model/selectors';
 import { getMachiningRule } from './rules';
+import { applyRule, isApplicable } from './declarative';
 
 /**
  * Применить ручную правку к автоматической операции (§42). Правка хранится в
@@ -33,6 +34,24 @@ export function generateMachining(project: Project): MachiningOperation[] {
     const partA = findPart(project, conn.partAId);
     const partB = findPart(project, conn.partBId);
     if (!hardware || !partA || !partB) continue;
+
+    /* Если у фурнитуры заданы собственные правила присадки (§14), работают
+     * они; иначе — встроенное правило категории из реестра. Так пользователь
+     * может описать свой крепёж, не трогая код, а каталог прошлых этапов
+     * продолжает работать как раньше. */
+    const declarative = hardware.machiningRules ?? [];
+    if (declarative.length > 0) {
+      const material = project.materials.find((m) => m.id === partA.material);
+      const ctx = { connection: conn, hardware, partA, partB, material };
+      for (const rule of declarative) {
+        if (!isApplicable(rule, ctx).applicable) continue;
+        for (const op of applyRule(rule, ctx)) {
+          ops.push(applyOverride({ ...op, hardwareId: hardware.id }, overrides));
+        }
+      }
+      continue;
+    }
+
     const rule = getMachiningRule(hardware.category);
     if (!rule) continue;
     for (const op of rule.build({ connection: conn, hardware, partA, partB })) {

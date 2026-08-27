@@ -46,8 +46,23 @@ export type MaterialKind =
   | 'plywood'
   | 'edge-glued'
   | 'solid'
+  | 'hdf'
   | 'glass'
   | 'other';
+
+/**
+ * Категория материала для библиотеки (§3). Это внешнее, «человеческое» имя
+ * того же деления, что и MaterialKind: kind остаётся техническим полем модели
+ * (по нему работают раскрой и 3D), category — тем, что видит пользователь.
+ * Две шкалы связаны однозначно, дублирующей модели материала не возникает.
+ */
+export type MaterialCategory =
+  | 'LDSP'
+  | 'MDF'
+  | 'PLYWOOD'
+  | 'SOLID_WOOD'
+  | 'HDF'
+  | 'OTHER';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Материалы и кромка
@@ -67,6 +82,16 @@ export interface Material {
   textureId?: string;
   /** Стоимость — опциональна, не обязательна для работы программы. */
   cost?: { perSheet?: number; perSquareMeter?: number; currency?: string };
+  /** Категория для библиотеки (§2/§3); выводится из kind, если не задана. */
+  category?: MaterialCategory;
+  /** Совместимые кромки: id EdgeMaterial. Пусто — совместимы любые (§2). */
+  edgeCompatibility?: EdgeMaterialId[];
+  /** Архивная позиция не предлагается в новых проектах (§28). */
+  archived?: boolean;
+  /** Версия схемы записи библиотеки (§57). */
+  schemaVersion?: number;
+  /** Ссылка на запись глобальной библиотеки, из которой скопирован объект (§60). */
+  libraryRef?: LibraryRef;
   metadata?: Record<string, unknown>;
 }
 
@@ -77,7 +102,31 @@ export interface EdgeMaterial {
   width?: Mm;
   color: string;
   cost?: { perMeter?: number; currency?: string };
+  /** Материал кромки: ABS, PVC, меламин и т.п. (§8). */
+  material?: string;
+  manufacturer?: string;
+  /** Артикул/код позиции (§8). Не выдумывается — пусто, если неизвестен. */
+  code?: string;
+  archived?: boolean;
+  schemaVersion?: number;
+  libraryRef?: LibraryRef;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Стабильная ссылка на запись глобальной библиотеки (§60).
+ *
+ * Проект хранит СВОЮ копию материала/кромки/фурнитуры, а ссылка нужна лишь
+ * для того, чтобы позже предложить «Обновить из библиотеки» (§62). Изменение
+ * глобальной библиотеки само по себе проект не трогает (§61).
+ */
+export interface LibraryRef {
+  /** id записи в глобальной библиотеке. */
+  libraryId: string;
+  /** Версия библиотечной записи на момент копирования в проект. */
+  revision: number;
+  /** Когда скопировано (ISO). */
+  linkedAt: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,10 +207,17 @@ export type MachiningOverride = Partial<
 export interface ManufacturingProfile {
   id: string;
   name: string;
+  /** Ширина пропила пилы. */
   sawKerf: Mm;
+  /** Обрезка кромки листа перед раскроем (§17). */
+  trimAllowance?: Mm;
+  /** Минимальный размер делового остатка (§17). */
+  minimumRemnant?: Mm;
   minHoleEdgeDistance: Mm;
   defaultDrillDepth: Mm;
   defaultJointType: ConnectionType;
+  archived?: boolean;
+  schemaVersion?: number;
 }
 
 /** Технологические ограничения присадки (не зашиваются в UI). */
@@ -212,10 +268,55 @@ export interface Hardware {
   manufacturer?: string;
   article?: string;
   model?: string;
-  /** Параметры крепежа: diameter, length, headDiameter и т.п. */
+  /** Параметры крепежа: diameter, length, headDiameter и т.п. (§13). */
   parameters?: Record<string, number | string | boolean>;
   cost?: { perUnit?: number; currency?: string };
+  /**
+   * Правила присадки этой позиции (§10/§14). Если не заданы, применяется
+   * правило по категории из реестра machining — то есть каталог продолжает
+   * работать без изменений.
+   */
+  machiningRules?: HardwareRule[];
+  archived?: boolean;
+  schemaVersion?: number;
+  libraryRef?: LibraryRef;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * HardwareRule (§14) — декларативное описание ОДНОЙ операции присадки,
+ * которую порождает крепёж. Данные, а не код: пользователь может задать
+ * правило для своей фурнитуры прямо в редакторе, не трогая исходники.
+ *
+ * Правило превращается в MachiningOperation через RuleEngine (§15).
+ */
+export interface HardwareRule {
+  id: string;
+  /** Что делаем: сверление, присадка под чашку, паз и т.п. */
+  operation: MachiningType;
+  /** На какую деталь стыка ложится операция. */
+  target: 'through' | 'receiving' | 'both';
+  diameter: Mm;
+  /** Глубина глухого отверстия; для сквозного не используется. */
+  depth?: Mm;
+  through?: boolean;
+  /** Сколько операций на один стык (например, 2 конфирмата). */
+  count?: number;
+  /** Отступ от края стыка до крайней операции. */
+  edgeOffset?: Mm;
+  /** Ограничения применимости (§45). */
+  constraints?: HardwareRuleConstraints;
+  metadata?: Record<string, unknown>;
+}
+
+/** Ограничения правила: когда крепёж физически применим (§45). */
+export interface HardwareRuleConstraints {
+  minThickness?: Mm;
+  maxThickness?: Mm;
+  /** Разрешённые категории материала; пусто — любые. */
+  materialCategories?: MaterialCategory[];
+  /** Минимальная длина стыка, при которой крепёж имеет смысл. */
+  minJointLength?: Mm;
 }
 
 /**

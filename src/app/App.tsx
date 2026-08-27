@@ -14,6 +14,7 @@ import { HardwareView } from '@/components/panels/HardwareView';
 import { MachiningView } from '@/components/panels/MachiningView';
 import { CuttingView } from '@/components/panels/CuttingView';
 import { DocumentsView } from '@/components/panels/DocumentsView';
+import { LibraryView } from '@/components/panels/LibraryView';
 import { Scene3D, type CameraApi } from '@/features/designer/Scene3D';
 import { ModelTree } from '@/components/panels/ModelTree';
 import { PartProperties } from '@/components/panels/PartProperties';
@@ -24,7 +25,7 @@ import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { saveCurrentProject } from '@/features/project/projectActions';
 
-type CenterView = '3d' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents';
+type CenterView = '3d' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library';
 type ViewMode = '3d' | '2d' | 'split';
 
 export function App() {
@@ -119,6 +120,7 @@ export function App() {
               ['machining', 'Присадка'],
               ['cutting', 'Раскрой'],
               ['documents', 'Документы'],
+              ['library', 'Библиотека'],
             ] as Array<[CenterView, string]>
           ).map(([v, label]) => (
             <button key={v} className={centerView === v ? 'active' : ''} onClick={() => setCenterView(v)}>
@@ -194,6 +196,7 @@ export function App() {
           {centerView === 'hardware' && <HardwareView />}
           {centerView === 'machining' && <MachiningView />}
           {centerView === 'cutting' && <CuttingView onOpenDrawing={(partId) => { selectPart(partId); setCenterView('documents'); }} />}
+          {centerView === 'library' && <LibraryView />}
           {centerView === 'documents' && (
             <DocumentsView
               onOpenIn3D={() => setCenterView('3d')}
