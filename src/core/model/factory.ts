@@ -201,6 +201,20 @@ export function createDefaultHardware(): Hardware[] {
       category: 'shelf-support',
       parameters: { diameter: 5 },
     },
+    // Петля и ручка нужны, чтобы правила фасадов могли создать соединения
+    // (§35): без крепежа нужной категории соединение не порождается.
+    {
+      id: newHardwareId(),
+      name: 'Петля чашечная 35 мм',
+      category: 'hinge',
+      parameters: { cupDiameter: 35, cupDepth: 12.5, cupEdgeOffset: 22.5, screwDiameter: 2.5, count: 2, edgeOffset: 90 },
+    },
+    {
+      id: newHardwareId(),
+      name: 'Ручка 96 мм',
+      category: 'handle',
+      parameters: { centerDistance: 96, diameter: 5, edgeOffset: 40 },
+    },
   ];
 }
 

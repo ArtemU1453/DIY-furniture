@@ -9,6 +9,7 @@ import { finalizeScene, type Prim } from './scene';
 import { hDim, renderDimension, vDim } from './dimensions';
 import { pickScale } from './layout';
 import { positionNumbers } from './positions';
+import { connectionNumbers } from '@/engines/connections';
 import { fmtMm } from './notation';
 import type { Balloon } from './drawingModel';
 import type { DrawingDocument, DrawingPage, Orientation, SheetFormat } from './sheet';
@@ -55,6 +56,33 @@ export function buildAssemblyDocument(project: Project): DrawingDocument {
       balloons.push({ id: `balloon-${pos}`, position: pos, partId: p.id, x: cx, y: cy });
     }
   });
+  /* Маркеры соединений C01, C02… рядом со стыком деталей (§64). Позиция
+   * маркера — середина отрезка между центрами соединяемых деталей. */
+  const connNumbers = connectionNumbers(project.hardwareConnections);
+  const boxByPartId = new Map(parts.map((p, i) => [String(p.id), boxes[i]]));
+  const connectionMarkers: Array<{ id: string; number: string; x: number; y: number }> = [];
+  const usedSpots = new Set<string>();
+  for (const c of project.hardwareConnections) {
+    const ba = boxByPartId.get(String(c.partAId));
+    const bb = boxByPartId.get(String(c.partBId));
+    if (!ba || !bb) continue;
+    const mx = ((ba.min.x + ba.max.x) / 2 + (bb.min.x + bb.max.x) / 2) / 2 - minX;
+    const my = ((ba.min.y + ba.max.y) / 2 + (bb.min.y + bb.max.y) / 2) / 2 - minY;
+    // Не рисуем несколько маркеров в одной точке — чертёж должен читаться.
+    const spot = `${Math.round(mx / 20)}:${Math.round(my / 20)}`;
+    if (usedSpots.has(spot)) continue;
+    usedSpots.add(spot);
+    const number = connNumbers.get(String(c.id)) ?? '';
+    const cx = S(mx);
+    const cy = S(my);
+    prims.push({ kind: 'circle', cx, cy, r: 3.4, stroke: '#7a5a2a', sw: 0.4, fill: '#fff6e6' });
+    prims.push({
+      kind: 'text', x: cx, y: cy, text: number, size: 2.4,
+      color: '#7a5a2a', anchor: 'middle', baseline: 'middle',
+    });
+    connectionMarkers.push({ id: String(c.id), number, x: cx, y: cy });
+  }
+
   // Вид сбоку (ZY) справа.
   const sideOx = S(W) + S(gap);
   for (const b of boxes) rect(sideOx + S(b.min.z - minZ), S(b.min.y - minY), S(b.max.z - b.min.z), S(b.max.y - b.min.y));
@@ -100,6 +128,9 @@ export function buildAssemblyDocument(project: Project): DrawingDocument {
       positionToPart: Object.fromEntries(balloons.map((b) => [b.position, String(b.partId)])),
       hardwareCount: project.hardware.length,
       connectionCount: project.hardwareConnections.length,
+      // Связь маркера с соединением (§64): по номеру можно открыть узел.
+      connectionMarkers,
+      markerToConnection: Object.fromEntries(connectionMarkers.map((m) => [m.number, m.id])),
     },
   };
 }

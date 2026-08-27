@@ -17,6 +17,8 @@ export const MACHINING_TYPE_LABELS: Record<MachiningType, string> = {
   slot: 'Паз',
   dowel: 'Шкант',
   confirmat: 'Конфирмат',
+  countersink: 'Зенковка',
+  cut: 'Рез',
   hinge: 'Петля',
   custom: 'Прочее',
 };

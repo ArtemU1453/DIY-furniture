@@ -32,6 +32,8 @@ export interface PartsListRow {
   thickness: number;
   material: string;
   edge: string;
+  /** Сколько соединений приходится на деталь (§65). */
+  connections: number;
   /** Примечание: не выдумывается, берётся из metadata.note или пустое (§24). */
   note: string;
 }
@@ -39,6 +41,13 @@ export interface PartsListRow {
 /** Сгруппированные строки спецификации деталей. */
 export function partsListRows(project: Project): PartsListRow[] {
   const positions = positionNumbers(project);
+  // Число соединений детали считается из модели, а не вводится вручную (§65).
+  const connectionCount = new Map<string, number>();
+  for (const c of project.hardwareConnections) {
+    for (const id of [String(c.partAId), String(c.partBId)]) {
+      connectionCount.set(id, (connectionCount.get(id) ?? 0) + 1);
+    }
+  }
   const matName = new Map(project.materials.map((m) => [m.id, m.name]));
   const opsByPart = new Map<string, string>();
   for (const op of allOperations(project)) {
@@ -55,6 +64,7 @@ export function partsListRows(project: Project): PartsListRow[] {
     const existing = groups.get(key);
     if (existing) {
       existing.row.quantity += p.quantity;
+      existing.row.connections += connectionCount.get(String(p.id)) ?? 0;
       existing.ids.push(num);
     } else {
       groups.set(key, {
@@ -69,6 +79,7 @@ export function partsListRows(project: Project): PartsListRow[] {
           thickness: p.thickness,
           material: p.material ? matName.get(p.material) ?? '—' : '—',
           edge: edgeSummary(project, p),
+          connections: connectionCount.get(String(p.id)) ?? 0,
           note: (p.metadata?.note as string) ?? '',
         },
       });
@@ -89,12 +100,14 @@ export function buildPartsListDocument(project: Project): DrawingDocument {
     { title: 'Ширина', width: 20, align: 'end' },
     { title: 'Толщ', width: 14, align: 'end' },
     { title: 'Материал', width: 50 },
-    { title: 'Кромка', width: 30 },
-    { title: 'Примечание', width: 34 },
+    { title: 'Кромка', width: 28 },
+    { title: 'Соед.', width: 14, align: 'end' },
+    { title: 'Примечание', width: 28 },
   ];
   const rows = partsListRows(project).map((r) => [
     String(r.position), r.ids, r.name, String(r.quantity),
-    fmtMm(r.length), fmtMm(r.width), fmtMm(r.thickness), r.material, r.edge, r.note,
+    fmtMm(r.length), fmtMm(r.width), fmtMm(r.thickness), r.material, r.edge,
+    String(r.connections), r.note,
   ]);
   const pages = tablePages(project, 'PARTS_LIST', 'Спецификация деталей', cols, rows);
   return { id: `doc-partslist-${project.id}`, type: 'PARTS_LIST', projectId: project.id, title: 'Спецификация деталей', pages };

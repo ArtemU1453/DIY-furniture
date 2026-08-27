@@ -23,6 +23,7 @@ const TO_CATEGORY: Record<ConnectionType, HardwareCategory> = {
   MINIFIX: 'minifix',
   SCREW: 'screw',
   CAM_LOCK: 'connector',
+  CUSTOM: 'other',
   OTHER: 'other',
 };
 
@@ -34,6 +35,7 @@ export const CONNECTION_TYPE_LABELS: Record<ConnectionType, string> = {
   MINIFIX: 'Минификс',
   SCREW: 'Саморез',
   CAM_LOCK: 'Эксцентриковая стяжка',
+  CUSTOM: 'Своё соединение',
   OTHER: 'Другое',
 };
 
