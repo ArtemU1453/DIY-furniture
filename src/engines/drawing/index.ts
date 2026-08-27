@@ -104,7 +104,7 @@ export {
 export { buildCuttingDocument } from './cutting';
 export { buildSpecificationDocument, groupParts, tablePages } from './specification';
 export { buildPartsListDocument, partsListRows, type PartsListRow } from './partsList';
-export { buildHardwareListDocument, hardwareListRows, type HardwareListRow } from './hardwareList';
+export { buildHardwareListDocument, hardwareListRows, hardwareListExpandedRows, type HardwareListRow } from './hardwareList';
 export { buildProjectSummaryDocument, projectSummaryData, type ProjectSummaryData } from './summary';
 export { buildProductionReport } from './report';
 export { positionNumbers } from './positions';
