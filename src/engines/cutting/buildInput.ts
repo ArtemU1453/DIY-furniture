@@ -88,8 +88,12 @@ function kerfFor(project: Project, material: Material): number {
 /** Переиспользуемые остатки для материала (если включено использование остатков). */
 function remnantSheetsFor(project: Project, materialId: MaterialId): RemnantSheet[] {
   if (!project.cutting.settings.useRemnants) return [];
+  /* В новый раскрой идут только доступные остатки (§92): зарезервированный,
+   * израсходованный или архивный остаток физически недоступен, поэтому
+   * планировать раскрой по нему нельзя. Остаток без статуса — из проектов до
+   * этого этапа — считается доступным. */
   return project.remnants
-    .filter((r) => r.materialId === materialId)
+    .filter((r) => r.materialId === materialId && (r.status ?? 'AVAILABLE') === 'AVAILABLE')
     .map((r) => ({ id: r.id, length: Math.max(r.width, r.height), width: Math.min(r.width, r.height) }));
 }
 

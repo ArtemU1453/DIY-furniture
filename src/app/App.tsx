@@ -197,7 +197,13 @@ export function App() {
           {centerView === 'materials' && <MaterialsView />}
           {centerView === 'hardware' && <HardwareView />}
           {centerView === 'machining' && <MachiningView />}
-          {centerView === 'cutting' && <CuttingView onOpenDrawing={(partId) => { selectPart(partId); setCenterView('documents'); }} />}
+          {centerView === 'cutting' && (
+            <CuttingView
+              onOpenDrawing={(partId) => { selectPart(partId); setCenterView('documents'); }}
+              onOpenIn3D={(partId) => { selectPart(partId); setCenterView('3d'); }}
+              onOpenPart={(partId) => { selectPart(partId); setCenterView('table'); }}
+            />
+          )}
           {centerView === 'parametric' && <ParametricPanel />}
           {centerView === 'library' && <LibraryView />}
           {centerView === 'documents' && (

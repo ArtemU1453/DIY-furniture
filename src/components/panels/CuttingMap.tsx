@@ -1,5 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type { CuttingSheetResult, GrainDirection, Placement } from '@/core/model/types';
+import { instanceCounts, placementLabel } from '@/engines/cutting';
 
 const SHEET_GAP = 200; // мм между листами на карте
 
@@ -49,6 +50,10 @@ export const CuttingMap = forwardRef<CuttingMapHandle, Props>(function CuttingMa
   ref,
 ) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+
+  /* Сколько экземпляров у каждой детали — определяет, писать ли на карте
+   * «P001» или «P001-2» (§78/§79). Считается один раз на все листы. */
+  const counts = useMemo(() => instanceCounts(sheets.flatMap((sh) => sh.placements)), [sheets]);
 
   const layouts = useMemo<SheetLayout[]>(() => {
     const out: SheetLayout[] = [];
@@ -220,7 +225,12 @@ export const CuttingMap = forwardRef<CuttingMapHandle, Props>(function CuttingMa
                   {grain !== 'none' && (
                     <GrainArrow x={wx} y={wy} w={p.length} h={p.width} grain={grain} rotation={p.rotation} />
                   )}
-                  <text x={wx + p.length / 2} y={wy + p.width / 2} fill="#e6e7e9" fontSize={Math.min(p.length, p.width) * 0.3} textAnchor="middle" dominantBaseline="middle" style={{ pointerEvents: 'none' }}>{p.number}</text>
+                  <PlacementLabel
+                    x={wx} y={wy} w={p.length} h={p.width}
+                    label={placementLabel(p, counts)}
+                    rotation={p.rotation}
+                    viewWidth={vb.w}
+                  />
                 </g>
               );
             })}
@@ -267,6 +277,55 @@ function GrainArrow({ x, y, w, h, grain, rotation }: { x: number; y: number; w: 
     <g stroke="#8fa3c4" fill="#8fa3c4" strokeWidth={Math.min(w, h) * 0.02} style={{ pointerEvents: 'none' }}>
       <line x1={p.x1} y1={p.y1} x2={p.x2} y2={p.y2} />
       <polygon points={head} />
+    </g>
+  );
+}
+
+/**
+ * Метка детали на карте (§68/§71–§73).
+ *
+ * Показывает идентификатор экземпляра (P001-2), а при достаточном размере на
+ * ЭКРАНЕ — ещё размер и признак поворота. Порог считается от текущего
+ * viewBox, поэтому при зуме скрытый текст возвращается сам (§71).
+ *
+ * Кегль подбирается по обеим сторонам детали И по длине строки, чтобы метка
+ * не выползала за узкую деталь и не перекрывала соседние (§73).
+ */
+function PlacementLabel({
+  x, y, w, h, label, rotation, viewWidth,
+}: { x: number; y: number; w: number; h: number; label: string; rotation: number; viewWidth: number }) {
+  // Доля ширины карты, которую занимает деталь: мера её размера на экране.
+  const onScreen = w / viewWidth;
+  const lines: string[] = [label];
+  if (onScreen > 0.12) lines.push(`${Math.round(w)}×${Math.round(h)}`);
+  if (rotation !== 0 && onScreen > 0.08) lines.push(`ROT ${rotation}°`);
+
+  const longest = Math.max(...lines.map((l) => l.length));
+  // Кегль: не выше доли высоты детали, не шире её длины, не крупнее трети
+  // короткой стороны — что жёстче, то и берётся.
+  const size = Math.min(
+    (h / lines.length) * 0.55,
+    (w / longest) * 1.6,
+    Math.min(w, h) * 0.3,
+  );
+  if (size <= 0) return null;
+
+  const top = y + h / 2 - ((lines.length - 1) * size) / 2;
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      {lines.map((line, i) => (
+        <text
+          key={line}
+          x={x + w / 2}
+          y={top + i * size}
+          fill={i === 0 ? '#e6e7e9' : '#aab2bd'}
+          fontSize={i === 0 ? size : size * 0.8}
+          textAnchor="middle"
+          dominantBaseline="middle"
+        >
+          {line}
+        </text>
+      ))}
     </g>
   );
 }

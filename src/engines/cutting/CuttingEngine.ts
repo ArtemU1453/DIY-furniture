@@ -9,6 +9,12 @@ import type { CuttingInput, CuttingResult, CuttingRunControls } from './types';
 export interface CuttingEngine {
   readonly id: string;
   readonly name: string;
+  /**
+   * Версия алгоритма (§57). Меняется, когда правка движка меняет РЕЗУЛЬТАТ
+   * при тех же входных данных. Версия попадает в CuttingResult, поэтому по
+   * старому результату видно, каким поколением алгоритма он посчитан.
+   */
+  readonly version: string;
   /** Рассчитать раскрой одного материала. controls — прогресс/отмена. */
   calculate(input: CuttingInput, controls?: CuttingRunControls): CuttingResult;
 }
