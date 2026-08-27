@@ -384,6 +384,7 @@ export type HardwareCategory =
   | 'screw' // саморез
   | 'leg' // опора
   | 'handle' // ручка
+  | 'back-panel' // крепёж задней стенки
   | 'other';
 
 /** Единица фурнитуры (крепёж/навес). Количество НЕ хранится — оно
@@ -395,8 +396,20 @@ export interface Hardware {
   manufacturer?: string;
   article?: string;
   model?: string;
+  description?: string;
   /** Параметры крепежа: diameter, length, headDiameter и т.п. (§13). */
   parameters?: Record<string, number | string | boolean>;
+  /**
+   * Совместимые материалы плиты (§2/§39). Пусто — совместим с любыми: так
+   * позиции прошлых этапов продолжают работать без правки.
+   */
+  compatibleMaterials?: MaterialId[];
+  /**
+   * Допустимый диапазон толщины детали, мм (§39/§41). Выход за диапазон —
+   * предупреждение, а не запрет: крепёж часто ставят и «на грани».
+   */
+  thicknessRange?: { min?: Mm; max?: Mm };
+  /** Цена необязательна и на геометрию не влияет (§82/§83). */
   cost?: { perUnit?: number; currency?: string };
   /**
    * Правила присадки этой позиции (§10/§14). Если не заданы, применяется
@@ -408,6 +421,83 @@ export interface Hardware {
   schemaVersion?: number;
   libraryRef?: LibraryRef;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Состояние позиции фурнитуры в проекте (§81).
+ *
+ * MISSING отличается от ERROR намеренно: соединение ссылается на позицию,
+ * которой нет в проекте. Соединение при этом НЕ удаляется (§79) — пользователь
+ * должен иметь возможность назначить замену (§80).
+ */
+export type HardwareStatus = 'VALID' | 'WARNING' | 'ERROR' | 'MISSING' | 'ARCHIVED';
+
+/** Компонент комплекта (§23/§24). */
+export interface HardwareComponent {
+  hardwareId: HardwareId;
+  /** Сколько штук этого компонента входит в ОДИН комплект. */
+  quantity: number;
+}
+
+/**
+ * Комплект фурнитуры (§23–§25): минификс = эксцентрик + шток + футорка.
+ *
+ * Комплект — это способ ПОСЧИТАТЬ, а не отдельная позиция склада: количество
+ * компонентов выводится из числа применений комплекта, поэтому независимого
+ * количества нигде не хранится (§85).
+ */
+export interface HardwareKit {
+  id: string;
+  name: string;
+  article?: string;
+  components: HardwareComponent[];
+  archived?: boolean;
+}
+
+/**
+ * Установленная единица фурнитуры (§18). Производная величина: выводится из
+ * соединения, поэтому дублей одной и той же единицы не бывает (§20), а
+ * стабильный id (§19) позволяет ссылаться на неё из 3D и документов.
+ */
+export interface HardwareInstance {
+  /** Стабильный id: `<connectionId>#<индекс>`. */
+  id: string;
+  hardwareId: HardwareId;
+  connectionId: HardwareConnectionId;
+  /** Деталь, на которой стоит единица (сторона A соединения). */
+  partId: PartId;
+  /** Вторая деталь узла — для навигации и подсветки. */
+  counterpartId?: PartId;
+  position?: Vec3;
+}
+
+/**
+ * Набор фурнитуры для типовой задачи (§64): «Стандартный корпус» — конфирмат,
+ * «Стандартные фасады» — петля и ручка. Пресет задаёт КАТЕГОРИЮ → позицию,
+ * поэтому один пресет работает с любой библиотекой.
+ */
+export interface HardwarePreset {
+  id: string;
+  name: string;
+  /** Категория крепежа → выбранная позиция. */
+  selection: Partial<Record<HardwareCategory, HardwareId>>;
+  /** Для какого профиля предназначен (§67). */
+  profile?: HardwareProfileKind;
+  builtin?: boolean;
+}
+
+/** Профиль применения фурнитуры (§67). */
+export type HardwareProfileKind = 'CARCASS' | 'FACADE' | 'DRAWER';
+
+/**
+ * Профиль фурнитуры (§67): какие категории крепежа относятся к корпусу,
+ * фасадам и ящикам. Нужен, чтобы пресет применялся к своей части изделия и
+ * не трогал остальное.
+ */
+export interface HardwareProfile {
+  kind: HardwareProfileKind;
+  name: string;
+  categories: HardwareCategory[];
 }
 
 /**
@@ -1012,6 +1102,12 @@ export interface Project {
   edges: EdgeMaterial[];
   hardware: Hardware[];
   hardwareConnections: HardwareConnection[];
+  /** Комплекты фурнитуры (§23). Необязательно — старые проекты открываются (§108). */
+  hardwareKits?: HardwareKit[];
+  /** Пресеты фурнитуры проекта (§64/§107). */
+  hardwarePresets?: HardwarePreset[];
+  /** Нормы расхода фурнитуры (§35): полкодержатели, крепёж задней стенки. */
+  hardwareRules?: Record<string, number>;
   machining: MachiningState;
   cutting: CuttingState;
   /** Библиотека форматов листов (SheetLibrary). */

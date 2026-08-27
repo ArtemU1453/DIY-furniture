@@ -43,6 +43,7 @@ export const HARDWARE_CATEGORY_LABELS: Record<HardwareCategory, string> = {
   screw: 'Саморез',
   leg: 'Опора',
   handle: 'Ручка',
+  'back-panel': 'Крепёж задней стенки',
   other: 'Другой крепёж',
 };
 

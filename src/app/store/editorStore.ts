@@ -39,6 +39,7 @@ import {
   type ParametricModel,
   type PartOverride,
 } from '@/engines/parametric';
+import { importHardwareLibrary, planPresetApplication } from '@/engines/hardware';
 import {
   applyEdgeConfiguration,
   applyPresetTo,
@@ -82,6 +83,7 @@ import type {
   SheetMaterial,
   StoredRemnant,
   ManufacturingProfile,
+  HardwarePreset,
   EdgeSide,
   EdgePreset,
   EdgeOverride,
@@ -430,6 +432,20 @@ export interface EditorState {
   resetOperationToRule: (id: MachiningId) => void;
   /** Сменить способ соединения (CONFIRMAT/DOWEL/…) — подбирает крепёж (§65/§66). */
   setConnectionType: (id: HardwareConnectionId, type: ConnectionType) => void;
+
+  // ── Фурнитура (этап 22) ───────────────────────────────────────────────────
+  /** Заменить фурнитуру соединения вручную (§57/§62). */
+  setConnectionHardware: (id: HardwareConnectionId, hardwareId: HardwareId) => void;
+  /** Вернуть расчётную фурнитуру узла (§63). */
+  resetConnectionHardware: (id: HardwareConnectionId) => boolean;
+  /** Применить пресет фурнитуры к выбранным деталям либо ко всему проекту (§65/§66). */
+  applyHardwarePreset: (preset: HardwarePreset, partIds?: PartId[]) => number;
+  /** Перевести позицию в архив вместо удаления (§12/§13). */
+  archiveHardware: (id: HardwareId, archived: boolean) => void;
+  /** Назначить замену вместо отсутствующей позиции (§80). */
+  replaceMissingHardware: (missingId: string, hardwareId: HardwareId) => number;
+  /** Импорт библиотеки фурнитуры из JSON (§74). */
+  importHardwareLibraryJson: (json: string) => { ok: boolean; added: number; skipped: number; error?: string };
   selectOperation: (id: MachiningId | null) => void;
 
   // ── Раскрой ──────────────────────────────────────────────────────────────
@@ -1484,6 +1500,95 @@ export const useEditorStore = create<EditorState>()(
         commit((p) => {
           if (p.machining.overrides) delete p.machining.overrides[id];
         }),
+
+      /* Замена фурнитуры узла — одна команда: присадка производна от связи и
+       * пересчитывается сама, поэтому количество, операции и 3D обновляются
+       * согласованно, а откат возвращает прежнюю позицию целиком (§58/§102). */
+      setConnectionHardware: (id, hardwareId) =>
+        commit((p) => {
+          const connection = p.hardwareConnections.find((c) => c.id === id);
+          if (!connection) return;
+          // Прежняя позиция запоминается, чтобы «вернуть расчётную» знало, к чему возвращаться.
+          const previous = String(connection.hardwareId);
+          connection.hardwareId = hardwareId;
+          connection.metadata = { ...(connection.metadata ?? {}), hardwareOverride: previous };
+        }),
+
+      resetConnectionHardware: (id) => {
+        const connection = get().project.hardwareConnections.find((c) => c.id === id);
+        const previous = connection?.metadata?.hardwareOverride as string | undefined;
+        if (!connection || !previous) return false;
+        commit((p) => {
+          const target = p.hardwareConnections.find((c) => c.id === id);
+          if (!target) return;
+          target.hardwareId = previous as HardwareId;
+          const meta = { ...(target.metadata ?? {}) };
+          delete meta.hardwareOverride;
+          target.metadata = Object.keys(meta).length > 0 ? meta : undefined;
+        });
+        return true;
+      },
+
+      applyHardwarePreset: (preset, partIds = []) => {
+        const changes = planPresetApplication(get().project, preset, partIds);
+        if (changes.length === 0) return 0;
+        commit((p) => {
+          for (const change of changes) {
+            const connection = p.hardwareConnections.find((c) => String(c.id) === change.connectionId);
+            if (!connection) continue;
+            connection.metadata = { ...(connection.metadata ?? {}), hardwareOverride: String(connection.hardwareId) };
+            connection.hardwareId = change.hardwareId;
+          }
+        });
+        return changes.length;
+      },
+
+      /* Архив вместо удаления (§12): позиция, использованная в проекте,
+       * физически не исчезает — иначе узлы остались бы без фурнитуры. */
+      archiveHardware: (id, archived) =>
+        commit((p) => {
+          const item = p.hardware.find((h) => h.id === id);
+          if (item) item.archived = archived || undefined;
+        }),
+
+      replaceMissingHardware: (missingId, hardwareId) => {
+        let replaced = 0;
+        commit((p) => {
+          for (const connection of p.hardwareConnections) {
+            if (String(connection.hardwareId) !== missingId) continue;
+            connection.hardwareId = hardwareId;
+            replaced += 1;
+          }
+        });
+        return replaced;
+      },
+
+      importHardwareLibraryJson: (json) => {
+        const result = importHardwareLibrary(json);
+        if (!result.ok) return { ok: false, added: 0, skipped: result.skipped, error: result.error };
+        commit((p) => {
+          const existing = new Set(p.hardware.map((h) => String(h.id)));
+          for (const item of result.hardware) {
+            // Повторный импорт того же файла обновляет позицию, а не плодит дубли.
+            if (existing.has(String(item.id))) {
+              const at = p.hardware.findIndex((h) => String(h.id) === String(item.id));
+              p.hardware[at] = { ...p.hardware[at], ...item };
+            } else {
+              p.hardware.push(item);
+            }
+          }
+          if (result.kits.length > 0) {
+            const kits = p.hardwareKits ?? [];
+            for (const kit of result.kits) {
+              const at = kits.findIndex((k) => k.id === kit.id);
+              if (at >= 0) kits[at] = kit;
+              else kits.push(kit);
+            }
+            p.hardwareKits = kits;
+          }
+        });
+        return { ok: true, added: result.hardware.length, skipped: result.skipped };
+      },
 
       setConnectionType: (id, type) =>
         commit((p) => {
