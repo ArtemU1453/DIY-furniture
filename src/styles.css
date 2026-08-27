@@ -271,3 +271,25 @@ select:focus {
   padding: 10px;
   font-size: 12px;
 }
+
+/* Предупреждение о пересечении деталей в 3D (этап 13). */
+.collision-warning {
+  position: absolute;
+  z-index: 5;
+  left: 8px;
+  bottom: 8px;
+  max-width: 60%;
+  padding: 5px 9px;
+  border-radius: 5px;
+  font-size: 12px;
+  color: #e8a06a;
+  background: rgba(60, 32, 12, 0.85);
+  border: 1px solid rgba(230, 120, 60, 0.4);
+  pointer-events: none;
+}
+
+/* Панель инструментов 3D-редактора. */
+.editor-toolbar button.active {
+  border-color: var(--accent);
+  background: var(--accent-dim, rgba(76, 141, 255, 0.15));
+}

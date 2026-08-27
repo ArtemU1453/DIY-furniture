@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import * as THREE from 'three';
 import type { ThreeEvent } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import type { Material, Part } from '@/core/model/types';
@@ -9,11 +10,14 @@ import { partBoxGeometry } from '@/core/geometry/partGeometry';
 const MM_TO_UNIT = 1 / 1000;
 const EDGE_VIS = 6 * MM_TO_UNIT; // визуальная толщина кромки
 
+type DisplayMode = 'solid' | 'wireframe' | 'edges' | 'transparent';
+
 interface Props {
   part: Part;
   material?: Material;
   selected: boolean;
   showNumber?: boolean;
+  displayMode?: DisplayMode;
   edgeColorOf?: (id: EdgeMaterialId | null) => string | undefined;
   onSelect: (id: Part['id']) => void;
 }
@@ -23,8 +27,11 @@ interface Props {
  * (Part → partBoxGeometry → BoxGeometry). Изменение размеров детали
  * автоматически меняет визуальный размер (пересчёт useMemo по зависимостям).
  */
-export function PartMesh({ part, material, selected, showNumber, edgeColorOf, onSelect }: Props) {
+export function PartMesh({ part, material, selected, showNumber, displayMode = 'solid', edgeColorOf, onSelect }: Props) {
   const geom = useMemo(() => partBoxGeometry(part), [part]);
+  const wireframe = displayMode === 'wireframe';
+  const transparent = displayMode === 'transparent';
+  const showEdges = displayMode === 'edges';
 
   const color = material?.color ?? '#c9b18a';
   const number = part.metadata?.number as string | undefined;
@@ -74,7 +81,16 @@ export function PartMesh({ part, material, selected, showNumber, edgeColorOf, on
         emissiveIntensity={selected ? 0.5 : 0}
         roughness={0.75}
         metalness={0.05}
+        wireframe={wireframe}
+        transparent={transparent}
+        opacity={transparent ? 0.35 : 1}
       />
+      {showEdges && (
+        <lineSegments>
+          <edgesGeometry args={[new THREE.BoxGeometry(w, h, t)]} />
+          <lineBasicMaterial color={selected ? '#4c8dff' : '#1a1b1e'} />
+        </lineSegments>
+      )}
       {edgeStrips.map((s) => (
         <mesh key={s.side} position={s.pos as [number, number, number]}>
           <boxGeometry args={s.size as [number, number, number]} />

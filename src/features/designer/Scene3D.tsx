@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { Line, OrbitControls } from '@react-three/drei';
+import { Line, OrbitControls, TransformControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { useEditorStore } from '@/app/store/editorStore';
 import { allParts, findPart } from '@/core/model/selectors';
-import { partWorldAABB } from '@/core/geometry/partGeometry';
+import { partWorldAABB, partBoxGeometry } from '@/core/geometry/partGeometry';
 import { operationWorld } from '@/core/geometry/coordinateSystem';
 import { allOperations } from '@/engines/machining';
-import type { MachiningId, MaterialId } from '@/core/model/ids';
-import type { HardwareCategory, Material, Project } from '@/core/model/types';
+import { overallDimensions, detectCollisions, validatePartChange } from '@/engines/viewer';
+import type { MachiningId, MaterialId, PartId } from '@/core/model/ids';
+import type { HardwareCategory, Material, Part, Project } from '@/core/model/types';
 import { PartMesh } from './PartMesh';
 import { ViewControls, type StandardView, VIEW_POSITIONS } from './ViewControls';
 
@@ -163,9 +164,10 @@ function ConnectionsLayer({ project, selectedId }: { project: Project; selectedI
   );
 }
 
-interface CameraApi {
+export interface CameraApi {
   setView: (view: StandardView) => void;
   focusOn: (point: [number, number, number]) => void;
+  fitAll: (box: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } }) => void;
 }
 
 /** Мост между HTML-кнопками видов и камерой внутри Canvas. */
@@ -196,20 +198,90 @@ function CameraRig({ apiRef }: { apiRef: React.MutableRefObject<CameraApi | null
       }
       camera.lookAt(x, y, z);
     },
+    fitAll: (box) => {
+      // Подобрать дистанцию так, чтобы вся модель попала в кадр.
+      const cx = ((box.min.x + box.max.x) / 2) * MM_TO_UNIT;
+      const cy = ((box.min.y + box.max.y) / 2) * MM_TO_UNIT;
+      const cz = ((box.min.z + box.max.z) / 2) * MM_TO_UNIT;
+      const sx = (box.max.x - box.min.x) * MM_TO_UNIT;
+      const sy = (box.max.y - box.min.y) * MM_TO_UNIT;
+      const sz = (box.max.z - box.min.z) * MM_TO_UNIT;
+      const radius = Math.max(0.2, Math.hypot(sx, sy, sz) / 2);
+      const persp = camera as THREE.PerspectiveCamera;
+      const fov = (persp.fov ?? 45) * (Math.PI / 180);
+      const dist = (radius / Math.sin(fov / 2)) * 1.15;
+      const dir = new THREE.Vector3(1, 0.75, 1).normalize();
+      camera.position.set(cx + dir.x * dist, cy + dir.y * dist, cz + dir.z * dist);
+      if (controls) {
+        controls.target.set(cx, cy, cz);
+        controls.update();
+      }
+      camera.lookAt(cx, cy, cz);
+    },
+  };
+  return null;
+}
+
+/** Гизмо перемещения выбранной детали: коммит позиции в модель на отпускании. */
+function TransformGizmo({ part, snap, onCommit }: { part: Part; snap: number; onCommit: (pos: { x: number; y: number; z: number }) => void }) {
+  const obj = useMemo(() => new THREE.Object3D(), []);
+  const g = partBoxGeometry(part);
+  useEffect(() => {
+    obj.position.set(g.position.x * MM_TO_UNIT, g.position.y * MM_TO_UNIT, g.position.z * MM_TO_UNIT);
+  }, [obj, g.position.x, g.position.y, g.position.z]);
+  return (
+    <TransformControls
+      object={obj}
+      mode="translate"
+      translationSnap={Math.max(1, snap) * MM_TO_UNIT}
+      onMouseUp={() => onCommit({ x: obj.position.x / MM_TO_UNIT, y: obj.position.y / MM_TO_UNIT, z: obj.position.z / MM_TO_UNIT })}
+    />
+  );
+}
+
+/** Габаритные размеры модели (значения из ProjectModel, не из mesh). */
+function DimensionsOverlay({ parts }: { parts: Part[] }) {
+  const d = useMemo(() => overallDimensions(parts), [parts]);
+  if (d.width === 0) return null;
+  const cx = ((d.min.x + d.max.x) / 2) * MM_TO_UNIT;
+  const label = (text: string, pos: [number, number, number]) => (
+    <Html position={pos} center style={{ pointerEvents: 'none' }}>
+      <div style={{ background: 'rgba(20,20,24,0.85)', color: '#e6e7e9', padding: '1px 5px', borderRadius: 3, fontSize: 11, whiteSpace: 'nowrap' }}>{text}</div>
+    </Html>
+  );
+  return (
+    <group>
+      {label(`Ш ${d.width}`, [cx, d.min.y * MM_TO_UNIT - 0.05, d.max.z * MM_TO_UNIT])}
+      {label(`В ${d.height}`, [d.max.x * MM_TO_UNIT + 0.05, ((d.min.y + d.max.y) / 2) * MM_TO_UNIT, d.max.z * MM_TO_UNIT])}
+      {label(`Г ${d.depth}`, [d.max.x * MM_TO_UNIT + 0.05, d.min.y * MM_TO_UNIT, ((d.min.z + d.max.z) / 2) * MM_TO_UNIT])}
+    </group>
+  );
+}
+
+/** Мост для экспорта PNG: сохраняет ссылку на WebGL-контекст. */
+function CaptureBridge({ apiRef }: { apiRef: React.MutableRefObject<{ capture: () => string } | null> }) {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  const camera = useThree((s) => s.camera);
+  apiRef.current = {
+    capture: () => {
+      gl.render(scene, camera);
+      return gl.domElement.toDataURL('image/png');
+    },
   };
   return null;
 }
 
 export function Scene3D({
   showNumbers,
-  showMachining,
-  showHardware,
   bodyMode = 'construction',
+  captureRef,
+  cameraRef,
 }: {
   showNumbers?: boolean;
-  showMachining?: boolean;
-  showHardware?: boolean;
   bodyMode?: 'construction' | 'body';
+  captureRef?: React.MutableRefObject<{ capture: () => string } | null>;
+  cameraRef?: React.MutableRefObject<CameraApi | null>;
 }) {
   const construction = bodyMode === 'construction';
   const project = useEditorStore((s) => s.project);
@@ -218,11 +290,25 @@ export function Scene3D({
   const selectedOperationId = useEditorStore((s) => s.selectedOperationId);
   const selectPart = useEditorStore((s) => s.selectPart);
   const selectOperation = useEditorStore((s) => s.selectOperation);
+  const updatePart = useEditorStore((s) => s.updatePart);
   const focusNonce = useEditorStore((s) => s.focusNonce);
+  const viewer = useEditorStore((s) => s.viewer);
+  const showMachining = viewer.showMachining;
+  const showHardware = viewer.showHardware;
 
-  const apiRef = useRef<CameraApi | null>(null);
+  const localApiRef = useRef<CameraApi | null>(null);
+  const apiRef = cameraRef ?? localApiRef;
+  const localCaptureRef = useRef<{ capture: () => string } | null>(null);
+  const capRef = captureRef ?? localCaptureRef;
 
-  const parts = useMemo(() => allParts(project).filter((p) => p.metadata?.hidden !== true), [project]);
+  const allVisible = useMemo(() => allParts(project).filter((p) => p.metadata?.hidden !== true), [project]);
+  const parts = useMemo(
+    () => (viewer.isolatedPartId ? allVisible.filter((p) => p.id === viewer.isolatedPartId) : allVisible),
+    [allVisible, viewer.isolatedPartId],
+  );
+  const collisions = useMemo(() => detectCollisions(allVisible), [allVisible]);
+  const selectedPart = selectedPartId ? findPart(project, selectedPartId) : undefined;
+  const movable = viewer.tool === 'move' && selectedPart && selectedPart.metadata?.locked !== true;
   const materials = project.materials;
 
   // Фокус камеры на выбранной детали по запросу (кнопка «Показать»).
@@ -250,18 +336,39 @@ export function Scene3D({
     return (id: string | null) => (id ? map.get(id) : undefined);
   }, [project.edges]);
 
+  // Перемещение детали: запись позиции в ProjectModel (3D не хранит позицию).
+  const commitMove = (pos: { x: number; y: number; z: number }) => {
+    if (!selectedPart) return;
+    const snap = Math.max(1, viewer.snap);
+    const snapped = {
+      x: Math.round(pos.x / snap) * snap,
+      y: Math.round(pos.y / snap) * snap,
+      z: Math.round(pos.z / snap) * snap,
+    };
+    const issues = validatePartChange(project, String(selectedPart.id), { position: snapped });
+    if (issues.some((i) => i.severity === 'error')) return; // недопустимо — не сохраняем
+    updatePart(selectedPart.id as PartId, { position: snapped });
+  };
+
   return (
     <>
       <ViewControls onSetView={(v) => apiRef.current?.setView(v)} />
-      <Canvas camera={{ position: VIEW_POSITIONS.perspective, fov: 45, near: 0.01, far: 100 }}>
+      {collisions.length > 0 && (
+        <div className="collision-warning">
+          Пересечение деталей: {collisions.slice(0, 3).map((c) => `${c.aName} ↔ ${c.bName}`).join('; ')}
+          {collisions.length > 3 ? ` и ещё ${collisions.length - 3}` : ''}
+        </div>
+      )}
+      <Canvas camera={{ position: VIEW_POSITIONS.perspective, fov: 45, near: 0.01, far: 100 }} gl={{ preserveDrawingBuffer: true }}>
         <CameraRig apiRef={apiRef} />
+        <CaptureBridge apiRef={capRef} />
         <color attach="background" args={['#17181b']} />
         <ambientLight intensity={0.6} />
         <directionalLight position={[3, 5, 4]} intensity={1.1} />
         <directionalLight position={[-4, 2, -3]} intensity={0.4} />
 
-        <gridHelper args={[10, 20, '#444a52', '#2c3036']} />
-        <axesHelper args={[1.5]} />
+        {viewer.showGrid && <gridHelper args={[10, 20, '#444a52', '#2c3036']} />}
+        {viewer.showAxes && <axesHelper args={[1.5]} />}
 
         {/* Клик по пустому месту снимает выбор. */}
         <mesh position={[0, -0.001, 0]} rotation={[-Math.PI / 2, 0, 0]} onClick={() => selectPart(null)} visible={false}>
@@ -276,10 +383,16 @@ export function Scene3D({
             material={part.material ? materialMap.get(part.material) : undefined}
             selected={part.id === selectedPartId}
             showNumber={showNumbers}
+            displayMode={viewer.displayMode}
             edgeColorOf={edgeColorOf}
             onSelect={selectPart}
           />
         ))}
+
+        {viewer.showDimensions && <DimensionsOverlay parts={parts} />}
+        {movable && selectedPart && (
+          <TransformGizmo part={selectedPart} snap={viewer.snap} onCommit={commitMove} />
+        )}
 
         {construction && <ConnectionsLayer project={project} selectedId={selectedConnectionId} />}
         {construction && showHardware && (

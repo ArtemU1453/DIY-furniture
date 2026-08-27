@@ -106,6 +106,35 @@ function allPartNumbers(project: Project): number {
   return max;
 }
 
+export type DisplayMode = 'solid' | 'wireframe' | 'edges' | 'transparent';
+
+/** UI-состояние 3D-редактора. Не сохраняется в производственную модель. */
+export type ViewerTool = 'select' | 'move';
+
+export interface ViewerUiState {
+  tool: ViewerTool;
+  displayMode: DisplayMode;
+  showGrid: boolean;
+  showAxes: boolean;
+  showDimensions: boolean;
+  showHardware: boolean;
+  showMachining: boolean;
+  isolatedPartId: PartId | null;
+  snap: number; // мм
+}
+
+export const DEFAULT_VIEWER: ViewerUiState = {
+  tool: 'select',
+  displayMode: 'solid',
+  showGrid: true,
+  showAxes: false,
+  showDimensions: false,
+  showHardware: true,
+  showMachining: false,
+  isolatedPartId: null,
+  snap: 10,
+};
+
 export interface EditorState {
   project: Project;
   selectedPartId: PartId | null;
@@ -120,6 +149,9 @@ export interface EditorState {
   focusNonce: number;
   past: Project[];
   future: Project[];
+
+  // ── Состояние 3D-редактора (только интерфейс, не производственные данные) ──
+  viewer: ViewerUiState;
 
   // ── Проект ────────────────────────────────────────────────────────────────
   newProject: (name?: string) => void;
@@ -151,6 +183,11 @@ export interface EditorState {
   duplicatePart: (id: PartId) => PartId | null;
   setPartFlag: (id: PartId, patch: { hidden?: boolean; locked?: boolean }) => void;
   renameFurniture: (id: FurnitureId, name: string) => void;
+
+  // ── 3D-редактор (UI) ────────────────────────────────────────────────────────
+  setViewer: (patch: Partial<ViewerUiState>) => void;
+  showAllParts: () => void;
+  isolatePart: (id: PartId | null) => void;
 
   // ── Сохранение / фокус ──────────────────────────────────────────────────────
   setSaveState: (state: 'saved' | 'unsaved' | 'saving') => void;
@@ -286,6 +323,16 @@ export const useEditorStore = create<EditorState>()(
       focusNonce: 0,
       past: [],
       future: [],
+      viewer: { ...DEFAULT_VIEWER },
+
+      setViewer: (patch) => set((s) => void Object.assign(s.viewer, patch)),
+      showAllParts: () =>
+        commit((p) => {
+          for (const f of p.furnitures) for (const a of f.assemblies) for (const part of a.parts) {
+            if (part.metadata?.hidden) part.metadata = { ...part.metadata, hidden: false };
+          }
+        }),
+      isolatePart: (id) => set((s) => void (s.viewer.isolatedPartId = id)),
 
       newProject: (name) => {
         set((state) => {
