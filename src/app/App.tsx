@@ -43,6 +43,7 @@ export function App() {
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   const project = useEditorStore((s) => s.project);
+  const selectPart = useEditorStore((s) => s.selectPart);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
 
@@ -192,7 +193,7 @@ export function App() {
           {centerView === 'materials' && <MaterialsView />}
           {centerView === 'hardware' && <HardwareView />}
           {centerView === 'machining' && <MachiningView />}
-          {centerView === 'cutting' && <CuttingView />}
+          {centerView === 'cutting' && <CuttingView onOpenDrawing={(partId) => { selectPart(partId); setCenterView('documents'); }} />}
           {centerView === 'documents' && <DocumentsView />}
         </div>
       </div>

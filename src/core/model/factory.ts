@@ -61,6 +61,8 @@ export const DEFAULT_CUTTING_SETTINGS: CuttingSettings = {
   usableRemnant: { minWidth: 100, minLength: 300, minArea: 60_000 },
   useRemnants: false,
   sheetSelection: {},
+  sheetPriority: {},
+  preferFewerSheets: true,
 };
 
 /** Полные настройки раскроя со значениями по умолчанию (для миграции). */
@@ -71,6 +73,7 @@ export function makeCuttingSettings(): CuttingSettings {
     usableRemnant: { ...DEFAULT_CUTTING_SETTINGS.usableRemnant },
     sheetOverrides: {},
     sheetSelection: {},
+    sheetPriority: {},
     locked: [],
   };
 }

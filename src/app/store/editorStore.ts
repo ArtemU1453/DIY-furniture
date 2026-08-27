@@ -247,6 +247,8 @@ export interface EditorState {
   recalculateCutting: () => Promise<void>;
   cancelCutting: () => void;
   setLockedPlacement: (placement: LockedPlacement) => void;
+  /** Применить готовый результат раскроя (напр. выбранный в сравнении алгоритмов). */
+  applyCuttingReport: (report: CuttingReport, algorithmId?: string) => void;
   clearLockedPlacements: () => void;
   toggleLockedPlacement: (placement: LockedPlacement) => void;
   rotatePlacement: (placement: LockedPlacement) => void;
@@ -915,6 +917,12 @@ export const useEditorStore = create<EditorState>()(
           s.cuttingProgress = null;
         });
       },
+
+      applyCuttingReport: (report, algorithmId) =>
+        commit((p) => {
+          p.cutting.report = report;
+          if (algorithmId) p.cutting.settings.algorithm = algorithmId;
+        }),
 
       setLockedPlacement: (placement) =>
         commit((p) => {

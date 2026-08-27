@@ -100,7 +100,7 @@ describe('Раскрой 10 — размещение и ограничения',
     const badSheet: CuttingSheetResult = {
       id: 's', materialId: MAT, index: 0, length: 2750, width: 1830, trim: inp.trim, cuts: [],
       placements: [{ pieceId: 'x', partId: 'x' as PartId, name: 'x', number: 'x', x: 2700, y: 100, length: 400, width: 300, rotation: 0, origin: 'manual', locked: false }],
-      remnants: [], usableAreaMm2: 1, usedAreaMm2: 1, wasteAreaMm2: 0, utilization: 1,
+      remnants: [], usableAreaMm2: 1, usedAreaMm2: 1, remnantAreaMm2: 0, wasteAreaMm2: 0, utilization: 1,
     };
     const issues = validateSheet(badSheet, inp);
     expect(issues.some((i) => i.code === 'cutting.outOfSheet')).toBe(true);
@@ -111,7 +111,7 @@ describe('Раскрой 10 — размещение и ограничения',
     const mk = (id: string): Placement => ({ pieceId: id, partId: id as PartId, name: id, number: id, x: 100, y: 100, length: 400, width: 300, rotation: 0, origin: 'automatic', locked: false });
     const badSheet: CuttingSheetResult = {
       id: 's', materialId: MAT, index: 0, length: 2750, width: 1830, trim: inp.trim, cuts: [],
-      placements: [mk('a'), mk('b')], remnants: [], usableAreaMm2: 1, usedAreaMm2: 1, wasteAreaMm2: 0, utilization: 1,
+      placements: [mk('a'), mk('b')], remnants: [], usableAreaMm2: 1, usedAreaMm2: 1, remnantAreaMm2: 0, wasteAreaMm2: 0, utilization: 1,
     };
     const issues = validateSheet(badSheet, inp);
     expect(issues.some((i) => i.code === 'cutting.overlap')).toBe(true);

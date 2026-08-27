@@ -66,6 +66,8 @@ export function deserializeProject(json: string): Project {
     const s = project.cutting.settings;
     if (!s.usableRemnant) s.usableRemnant = { ...DEFAULT_CUTTING_SETTINGS.usableRemnant };
     if (!s.sheetSelection) s.sheetSelection = {};
+    if (!s.sheetPriority) s.sheetPriority = {};
+    if (typeof s.preferFewerSheets !== 'boolean') s.preferFewerSheets = true;
   }
   // Библиотеки листов и остатков (этап 10).
   if (!Array.isArray(project.sheets)) project.sheets = createDefaultSheets(project.materials);

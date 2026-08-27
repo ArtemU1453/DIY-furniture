@@ -46,12 +46,29 @@ export function buildPieceInstances(project: Project): Map<MaterialId, CuttingPi
   return byMaterial;
 }
 
+/**
+ * Форматы листа для материала в порядке приоритета (§23/§24):
+ * 1) явный приоритет (sheetPriority), 2) выбранный формат, 3) остальные
+ * форматы библиотеки по убыванию площади. Алгоритм пробует их по очереди.
+ */
+export function sheetFormatsFor(project: Project, material: Material): SheetMaterial[] {
+  const forMaterial = project.sheets.filter((s) => s.materialId === material.id);
+  if (forMaterial.length === 0) return [];
+  const byId = new Map(forMaterial.map((s) => [s.id, s]));
+  const out: SheetMaterial[] = [];
+  const seen = new Set<string>();
+  const push = (sh: SheetMaterial | undefined) => {
+    if (sh && !seen.has(sh.id)) { seen.add(sh.id); out.push(sh); }
+  };
+  for (const id of project.cutting.settings.sheetPriority[material.id] ?? []) push(byId.get(id));
+  push(byId.get(project.cutting.settings.sheetSelection[material.id]));
+  for (const sh of [...forMaterial].sort((a, b) => b.height * b.width - a.height * a.width)) push(sh);
+  return out;
+}
+
 /** Выбранный формат листа из библиотеки для материала (или из материала). */
 function selectedSheet(project: Project, material: Material): SheetMaterial | undefined {
-  const forMaterial = project.sheets.filter((s) => s.materialId === material.id);
-  if (forMaterial.length === 0) return undefined;
-  const selId = project.cutting.settings.sheetSelection[material.id];
-  return forMaterial.find((s) => s.id === selId) ?? forMaterial[0];
+  return sheetFormatsFor(project, material)[0];
 }
 
 function sheetFor(project: Project, material: Material): { length: number; width: number; sheetMaterialId?: string; availableQuantity?: number } {
@@ -89,12 +106,17 @@ export function buildCuttingInputs(project: Project, materialFilter?: MaterialId
     if (!material) continue;
     const locked = settings.locked.filter((l) => pieces.some((p) => p.pieceId === l.pieceId));
     const sheet = sheetFor(project, material);
+    // Альтернативные форматы (для деталей, не влезающих в предпочтительный).
+    const alternates = sheetFormatsFor(project, material)
+      .slice(1)
+      .map((sh) => ({ id: sh.id, length: sh.height, width: sh.width, availableQuantity: sh.availableQuantity }));
     inputs.push({
       materialId,
       pieces,
       sheet: { length: sheet.length, width: sheet.width },
       sheetMaterialId: sheet.sheetMaterialId,
       availableQuantity: sheet.availableQuantity,
+      alternateSheets: alternates,
       remnantSheets: remnantSheetsFor(project, materialId),
       kerf: kerfFor(project, material),
       trim: { ...settings.trim },
@@ -152,6 +174,8 @@ export function productionSignature(project: Project): string {
     `usable:${s.usableRemnant.minWidth},${s.usableRemnant.minLength},${s.usableRemnant.minArea}`,
     `useRemnants:${s.useRemnants}`,
     `selection:${JSON.stringify(s.sheetSelection)}`,
+    `priority:${JSON.stringify(s.sheetPriority)}`,
+    `fewerSheets:${s.preferFewerSheets}`,
   ];
   return hash([...parts, ...mats, ...sheets, ...remnants, ...cfg].join('|'));
 }
