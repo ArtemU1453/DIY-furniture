@@ -16,7 +16,24 @@ import type {
   MaterialId,
   PartId,
 } from '@/core/model/ids';
-import { newHardwareConnectionId, newMachiningId, newPartId } from '@/core/model/ids';
+import {
+  newEdgeMaterialId,
+  newHardwareConnectionId,
+  newHardwareId,
+  newMachiningId,
+  newMaterialId,
+  newPartId,
+} from '@/core/model/ids';
+import {
+  buildUpdatePatches,
+  linkProfile,
+  linkToProject,
+  loadLibrary,
+  planHardwareReplace,
+  planMaterialReplace,
+  saveLibrary,
+  type LibraryModel,
+} from '@/engines/library';
 import type {
   CuttingReport,
   CuttingSettings,
@@ -286,6 +303,28 @@ export interface EditorState {
   removeConnection: (id: HardwareConnectionId) => void;
   selectConnection: (id: HardwareConnectionId | null) => void;
   addHardwareFromTemplate: (template: HardwareTemplate) => HardwareId;
+
+  // ── Библиотека (глобальная, localStorage) ───────────────────────────────────
+  /** Текущее состояние глобальной библиотеки. */
+  library: LibraryModel;
+  /** Перечитать библиотеку из локального хранилища. */
+  reloadLibrary: () => void;
+  /** Записать библиотеку целиком (после операции сервиса) и сохранить локально. */
+  setLibrary: (library: LibraryModel) => void;
+  /** Добавить материал из библиотеки в проект (копия + ссылка, §60). */
+  addMaterialFromLibrary: (libraryId: string) => MaterialId | null;
+  /** Добавить кромку из библиотеки в проект. */
+  addEdgeFromLibrary: (libraryId: string) => EdgeMaterialId | null;
+  /** Добавить фурнитуру из библиотеки в проект. */
+  addHardwareFromLibrary: (libraryId: string) => HardwareId | null;
+  /** Назначить проекту производственный профиль из библиотеки. */
+  applyProfileFromLibrary: (libraryId: string) => boolean;
+  /** Обновить данные проекта из библиотеки (§62). */
+  updateFromLibrary: (projectIds?: string[]) => number;
+  /** Массовая замена материала в проекте (§47). */
+  replaceMaterial: (fromId: string, toId: string, partIds?: string[]) => number;
+  /** Массовая замена фурнитуры в проекте (§48). */
+  replaceHardware: (fromId: string, toId: string, connectionIds?: string[]) => number;
 
   // ── Присадка (ручные операции) ──────────────────────────────────────────────
   addManualOperation: (input: {
@@ -983,6 +1022,119 @@ export const useEditorStore = create<EditorState>()(
         const hardware = hardwareFromTemplate(template);
         commit((p) => void p.hardware.push(hardware));
         return hardware.id;
+      },
+
+      // ── Библиотека ────────────────────────────────────────────────────────
+      /* Библиотека глобальная и живёт в localStorage, проект хранит СВОИ копии
+       * (§59–§61): правка библиотеки сама по себе проект не меняет. */
+      library: loadLibrary(),
+
+      reloadLibrary: () => set((s) => void (s.library = loadLibrary())),
+
+      setLibrary: (library) => {
+        saveLibrary(library);
+        set((s) => void (s.library = library));
+      },
+
+      addMaterialFromLibrary: (libraryId) => {
+        const entry = get().library.materials.find((e) => String(e.value.id) === libraryId);
+        if (!entry) return null;
+        const material = linkToProject(entry);
+        // В проекте у объекта свой id: библиотечный остаётся только в ссылке.
+        material.id = newMaterialId();
+        commit((p) => void p.materials.push(material));
+        return material.id;
+      },
+
+      addEdgeFromLibrary: (libraryId) => {
+        const entry = get().library.edges.find((e) => String(e.value.id) === libraryId);
+        if (!entry) return null;
+        const edge = linkToProject(entry);
+        edge.id = newEdgeMaterialId();
+        commit((p) => void p.edges.push(edge));
+        return edge.id;
+      },
+
+      addHardwareFromLibrary: (libraryId) => {
+        const entry = get().library.hardware.find((e) => String(e.value.id) === libraryId);
+        if (!entry) return null;
+        const hardware = linkToProject(entry);
+        hardware.id = newHardwareId();
+        commit((p) => void p.hardware.push(hardware));
+        return hardware.id;
+      },
+
+      applyProfileFromLibrary: (libraryId) => {
+        const entry = get().library.profiles.find((e) => e.value.id === libraryId);
+        if (!entry) return false;
+        const profile = linkProfile(entry);
+        commit((p) => void (p.machining.profile = profile));
+        return true;
+      },
+
+      /* «Обновить из библиотеки» (§62): применяем подготовленные патчи одной
+       * командой, чтобы вся операция легла в undo/redo целиком. */
+      updateFromLibrary: (projectIds) => {
+        const patches = buildUpdatePatches(get().project, get().library, projectIds);
+        if (patches.length === 0) return 0;
+        commit((p) => {
+          for (const patch of patches) {
+            if (patch.section === 'materials') {
+              const index = p.materials.findIndex((m) => String(m.id) === patch.projectId);
+              if (index >= 0) {
+                const before = p.materials[index];
+                p.materials[index] = patch.value as Material;
+                // Толщина материала ведёт за собой толщину деталей (§29).
+                if (Math.abs(before.thickness - (patch.value as Material).thickness) > 0.01) {
+                  syncCabinetsToMaterial(p, before.id);
+                }
+              }
+            } else if (patch.section === 'edges') {
+              const index = p.edges.findIndex((e) => String(e.id) === patch.projectId);
+              if (index >= 0) p.edges[index] = patch.value as EdgeMaterial;
+            } else {
+              const index = p.hardware.findIndex((h) => String(h.id) === patch.projectId);
+              if (index >= 0) p.hardware[index] = patch.value as Hardware;
+            }
+          }
+        });
+        return patches.length;
+      },
+
+      /* Массовая замена (§47): меняем материал детали и подтягиваем толщину.
+       * Габариты детали не трогаем — их задаёт конструкция, а не материал (§46). */
+      replaceMaterial: (fromId, toId, partIds) => {
+        const plan = planMaterialReplace(get().project, fromId, toId, { partIds });
+        if (!plan || plan.partIds.length === 0) return 0;
+        const target = new Set(plan.partIds);
+        commit((p) => {
+          const to = p.materials.find((m) => String(m.id) === toId);
+          if (!to) return;
+          for (const f of p.furnitures) {
+            for (const a of f.assemblies) {
+              for (const part of a.parts) {
+                if (!target.has(String(part.id))) continue;
+                part.material = to.id;
+                part.thickness = to.thickness;
+              }
+            }
+          }
+        });
+        return plan.partIds.length;
+      },
+
+      replaceHardware: (fromId, toId, connectionIds) => {
+        const plan = planHardwareReplace(get().project, fromId, toId, { connectionIds });
+        if (!plan || plan.connectionIds.length === 0) return 0;
+        const target = new Set(plan.connectionIds);
+        commit((p) => {
+          const to = p.hardware.find((h) => String(h.id) === toId);
+          if (!to) return;
+          for (const c of p.hardwareConnections) {
+            if (target.has(String(c.id))) c.hardwareId = to.id;
+          }
+        });
+        return plan.connectionIds.length;
       },
 
       addManualOperation: (input) => {

@@ -1,5 +1,10 @@
 /** Локализация категорий каталога (материалы, фурнитура, текстура). */
-import type { GrainDirection, HardwareCategory, MaterialKind } from '@/core/model/types';
+import type {
+  GrainDirection,
+  HardwareCategory,
+  MaterialCategory,
+  MaterialKind,
+} from '@/core/model/types';
 
 export const MATERIAL_KIND_LABELS: Record<MaterialKind, string> = {
   ldsp: 'ЛДСП',
@@ -7,9 +12,24 @@ export const MATERIAL_KIND_LABELS: Record<MaterialKind, string> = {
   plywood: 'Фанера',
   'edge-glued': 'Мебельный щит',
   solid: 'Массив',
+  hdf: 'ХДФ',
   glass: 'Стекло',
   other: 'Другой листовой',
 };
+
+/** Категории материалов библиотеки (§3/§32). */
+export const MATERIAL_CATEGORY_LABELS: Record<MaterialCategory, string> = {
+  LDSP: 'ЛДСП',
+  MDF: 'МДФ',
+  PLYWOOD: 'Фанера',
+  SOLID_WOOD: 'Дерево',
+  HDF: 'ХДФ',
+  OTHER: 'Другое',
+};
+
+export function materialCategoryLabel(c: MaterialCategory): string {
+  return MATERIAL_CATEGORY_LABELS[c] ?? c;
+}
 
 export const HARDWARE_CATEGORY_LABELS: Record<HardwareCategory, string> = {
   confirmat: 'Конфирмат',
