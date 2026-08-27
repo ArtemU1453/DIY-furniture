@@ -15,6 +15,7 @@ import { MachiningView } from '@/components/panels/MachiningView';
 import { CuttingView } from '@/components/panels/CuttingView';
 import { DocumentsView } from '@/components/panels/DocumentsView';
 import { LibraryView } from '@/components/panels/LibraryView';
+import { ParametricPanel } from '@/components/panels/ParametricPanel';
 import { Scene3D, type CameraApi } from '@/features/designer/Scene3D';
 import { ModelTree } from '@/components/panels/ModelTree';
 import { PartProperties } from '@/components/panels/PartProperties';
@@ -25,7 +26,7 @@ import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { saveCurrentProject } from '@/features/project/projectActions';
 
-type CenterView = '3d' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library';
+type CenterView = '3d' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric';
 type ViewMode = '3d' | '2d' | 'split';
 
 export function App() {
@@ -119,6 +120,7 @@ export function App() {
               ['hardware', 'Фурнитура'],
               ['machining', 'Присадка'],
               ['cutting', 'Раскрой'],
+              ['parametric', 'Параметры'],
               ['documents', 'Документы'],
               ['library', 'Библиотека'],
             ] as Array<[CenterView, string]>
@@ -196,6 +198,7 @@ export function App() {
           {centerView === 'hardware' && <HardwareView />}
           {centerView === 'machining' && <MachiningView />}
           {centerView === 'cutting' && <CuttingView onOpenDrawing={(partId) => { selectPart(partId); setCenterView('documents'); }} />}
+          {centerView === 'parametric' && <ParametricPanel />}
           {centerView === 'library' && <LibraryView />}
           {centerView === 'documents' && (
             <DocumentsView
