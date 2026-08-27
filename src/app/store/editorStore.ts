@@ -40,6 +40,12 @@ import {
   type PartOverride,
 } from '@/engines/parametric';
 import {
+  applyEdgeConfiguration,
+  applyPresetTo,
+  quickActionConfig,
+  type EdgeQuickAction,
+} from '@/engines/edges';
+import {
   cabinetConnectionContext,
   planConnections,
   pruneDeadConnections,
@@ -75,6 +81,11 @@ import type {
   ProjectSettings,
   SheetMaterial,
   StoredRemnant,
+  ManufacturingProfile,
+  EdgeSide,
+  EdgePreset,
+  EdgeOverride,
+  PartRole,
   RemnantStatus,
 } from '@/core/model/types';
 import { newSheetMaterialId, newStoredRemnantId } from '@/core/model/ids';
@@ -100,6 +111,7 @@ import {
 import type { HardwareCategory } from '@/core/model/types';
 import { createAssembly, createFurniture, createPart, createProject } from '@/core/model/factory';
 import {
+  allParts,
   findAssemblyOfPart,
   findFurniture,
   findFurnitureOfPart,
@@ -296,6 +308,20 @@ export interface EditorState {
   addElement: (kind: 'panel' | 'shelf' | 'divider' | 'facade' | 'back') => PartId;
   removePart: (id: PartId) => void;
   updatePart: (id: PartId, patch: Partial<Part>) => void;
+
+  // ── Кромка (этап 21) ──────────────────────────────────────────────────────
+  /** Назначить кромку одной стороны детали вручную (§11). */
+  setPartEdge: (id: PartId, side: EdgeSide, materialId: EdgeMaterialId | null) => void;
+  /** Быстрое действие: все / длинные / короткие стороны, снять кромку (§15). */
+  applyEdgeQuickAction: (ids: PartId[], action: EdgeQuickAction, materialId: EdgeMaterialId | null) => number;
+  /** Применить пресет к ЯВНО выбранным деталям (§53/§55). */
+  applyEdgePreset: (ids: PartId[], preset: EdgePreset) => number;
+  /** Применить пресет ко всем деталям роли (§54). */
+  applyEdgePresetToRole: (role: PartRole, preset: EdgePreset) => number;
+  /** Ручная правка параметров одной кромки (§45). */
+  setEdgeOverride: (id: PartId, side: EdgeSide, override: EdgeOverride | null) => void;
+  /** Вернуть расчётные значения кромки стороны (§46). */
+  resetEdgeOverride: (id: PartId, side: EdgeSide) => void;
   duplicatePart: (id: PartId) => PartId | null;
   setPartFlag: (id: PartId, patch: { hidden?: boolean; locked?: boolean }) => void;
   renameFurniture: (id: FurnitureId, name: string) => void;
@@ -343,6 +369,8 @@ export interface EditorState {
   addEdge: (edge: EdgeMaterial) => void;
   updateEdge: (id: EdgeMaterialId, patch: Partial<EdgeMaterial>) => void;
   removeEdge: (id: EdgeMaterialId) => DeleteResult;
+  /** Правка производственного профиля (пропил, припуски, округление). */
+  updateManufacturingProfile: (patch: Partial<ManufacturingProfile>) => void;
 
   // ── Фурнитура ─────────────────────────────────────────────────────────────
   addHardware: (hardware: Hardware) => void;
@@ -1112,6 +1140,70 @@ export const useEditorStore = create<EditorState>()(
           if (part) Object.assign(part, patch);
         }),
 
+      /* Кромка пишется в Part.edges — единственный источник истины (§6/§7).
+       * EdgeBanding и EdgeOperation производны и пересчитываются сами, поэтому
+       * одна команда commit обновляет деталь, кромку и операции атомарно
+       * (§76/§77) и целиком попадает в undo (§78). */
+      setPartEdge: (id, side, materialId) =>
+        commit((p) => {
+          const part = findPart(p, id);
+          if (!part) return;
+          (part.edges as Record<EdgeSide, EdgeMaterialId | null>)[side] = materialId;
+          part.edgeSources = { ...(part.edgeSources ?? {}), [side]: 'MANUAL' };
+        }),
+
+      applyEdgeQuickAction: (ids, action, materialId) => {
+        const project = get().project;
+        const targets = ids.map((id) => findPart(project, id)).filter((x): x is Part => !!x);
+        if (targets.length === 0) return 0;
+        commit((p) => {
+          for (const target of targets) {
+            const part = findPart(p, target.id);
+            if (!part) return;
+            const { edges, sources } = applyEdgeConfiguration(
+              part, quickActionConfig(part, action, materialId), 'MANUAL',
+            );
+            part.edges = edges;
+            part.edgeSources = sources;
+          }
+        });
+        return targets.length;
+      },
+
+      applyEdgePreset: (ids, preset) => {
+        const project = get().project;
+        // Пресет применяется РОВНО к выбранным деталям (§55).
+        const targets = ids.map((id) => findPart(project, id)).filter((x): x is Part => !!x);
+        if (targets.length === 0) return 0;
+        const changes = applyPresetTo(targets, preset);
+        commit((p) => {
+          for (const change of changes) {
+            const part = findPart(p, change.partId);
+            if (!part) continue;
+            part.edges = change.edges;
+            part.edgeSources = change.sources;
+          }
+        });
+        return changes.length;
+      },
+
+      applyEdgePresetToRole: (role, preset) => {
+        const targets = allParts(get().project).filter((x) => x.role === role);
+        return get().applyEdgePreset(targets.map((x) => x.id), preset);
+      },
+
+      setEdgeOverride: (id, side, override) =>
+        commit((p) => {
+          const part = findPart(p, id);
+          if (!part) return;
+          const next = { ...(part.edgeOverrides ?? {}) };
+          if (override === null) delete next[side];
+          else next[side] = override;
+          part.edgeOverrides = Object.keys(next).length > 0 ? next : undefined;
+        }),
+
+      resetEdgeOverride: (id, side) => get().setEdgeOverride(id, side, null),
+
       addMaterial: (material) => commit((p) => void p.materials.push(material)),
 
       updateMaterial: (id, patch) =>
@@ -1154,6 +1246,11 @@ export const useEditorStore = create<EditorState>()(
         commit((p) => void (p.edges = p.edges.filter((e) => e.id !== id)));
         return { ok: true };
       },
+
+      updateManufacturingProfile: (patch) =>
+        commit((p) => {
+          if (p.machining.profile) Object.assign(p.machining.profile, patch);
+        }),
 
       addHardware: (hardware) => commit((p) => void p.hardware.push(hardware)),
 

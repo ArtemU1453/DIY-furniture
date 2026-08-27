@@ -799,9 +799,11 @@ describe('Документы 16 — экспорт, предпросмотр, п
   it('Тест 44/62: структура Document Center и полный комплект (§62/§66)', () => {
     const keys = DOCUMENT_LIST.map((d) => d.key);
     // Порядок основной структуры документации.
-    expect(keys.slice(0, 10)).toEqual([
+    // Ведомость кромки (этап 21) встала рядом с ведомостью материалов —
+    // обе описывают расход, поэтому идут до итогового листа.
+    expect(keys.slice(0, 11)).toEqual([
       'title', 'generalView', 'assembly', 'partsList', 'parts',
-      'cutting', 'machiningList', 'hardwareList', 'materialList', 'summary',
+      'cutting', 'machiningList', 'hardwareList', 'materialList', 'edgeList', 'summary',
     ]);
     // Все документы строятся без исключений и дают непустые страницы.
     const docs = buildAllDocuments(project());

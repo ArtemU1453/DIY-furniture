@@ -6,6 +6,7 @@
 import type { Part, Project } from '@/core/model/types';
 import { allParts } from '@/core/model/selectors';
 import { allOperations } from '@/engines/machining';
+import { edgeCount } from '@/engines/edges';
 import { edgeCode, fmtMm } from './notation';
 import { positionNumbers } from './positions';
 import { tablePages } from './specification';
@@ -34,6 +35,8 @@ export interface PartsListRow {
   edge: string;
   /** Сколько соединений приходится на деталь (§65). */
   connections: number;
+  /** Сколько сторон детали облицовано кромкой (§64). */
+  edgeCount: number;
   /** Примечание: не выдумывается, берётся из metadata.note или пустое (§24). */
   note: string;
 }
@@ -80,6 +83,7 @@ export function partsListRows(project: Project): PartsListRow[] {
           material: p.material ? matName.get(p.material) ?? '—' : '—',
           edge: edgeSummary(project, p),
           connections: connectionCount.get(String(p.id)) ?? 0,
+          edgeCount: edgeCount(project, p),
           note: (p.metadata?.note as string) ?? '',
         },
       });
@@ -101,13 +105,14 @@ export function buildPartsListDocument(project: Project): DrawingDocument {
     { title: 'Толщ', width: 14, align: 'end' },
     { title: 'Материал', width: 50 },
     { title: 'Кромка', width: 28 },
+    { title: 'EB', width: 12, align: 'end' },
     { title: 'Соед.', width: 14, align: 'end' },
     { title: 'Примечание', width: 28 },
   ];
   const rows = partsListRows(project).map((r) => [
     String(r.position), r.ids, r.name, String(r.quantity),
     fmtMm(r.length), fmtMm(r.width), fmtMm(r.thickness), r.material, r.edge,
-    String(r.connections), r.note,
+    String(r.edgeCount), String(r.connections), r.note,
   ]);
   const pages = tablePages(project, 'PARTS_LIST', 'Спецификация деталей', cols, rows);
   return { id: `doc-partslist-${project.id}`, type: 'PARTS_LIST', projectId: project.id, title: 'Спецификация деталей', pages };

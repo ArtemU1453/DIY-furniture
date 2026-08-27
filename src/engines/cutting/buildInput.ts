@@ -153,7 +153,14 @@ export function productionSignature(project: Project): string {
   const s = project.cutting.settings;
   const parts = allParts(project)
     .filter((p) => p.material)
-    .map((p) => `${p.id}:${p.width}x${p.height}x${p.thickness}:${p.material}:${p.quantity}`)
+    /* Текстура и кромка — тоже производственные данные детали: текстура
+     * управляет допустимым поворотом, кромка меняет и карту, и потребность.
+     * Без них смена того и другого молча оставляла бы раскрой «актуальным». */
+    .map((p) => [
+      `${p.id}:${p.width}x${p.height}x${p.thickness}:${p.material}:${p.quantity}`,
+      `grain:${p.grain}`,
+      `edges:${p.edges.left ?? ''},${p.edges.right ?? ''},${p.edges.top ?? ''},${p.edges.bottom ?? ''}`,
+    ].join('|'))
     .sort();
   const mats = project.materials
     .map((m) => `${m.id}:${m.thickness}:${m.sheet.length}x${m.sheet.width}:${m.grain}:${m.allowRotate}`)

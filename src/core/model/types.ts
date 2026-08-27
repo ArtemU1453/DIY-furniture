@@ -86,6 +86,11 @@ export interface Material {
   category?: MaterialCategory;
   /** Совместимые кромки: id EdgeMaterial. Пусто — совместимы любые (§2). */
   edgeCompatibility?: EdgeMaterialId[];
+  /**
+   * Кромка по умолчанию для этой плиты (§48/§49): ЛДСП 16 → ABS 0.4 белый.
+   * Правило кромки берёт её, когда сторона облицована, но материал не задан.
+   */
+  defaultEdgeMaterial?: EdgeMaterialId | null;
   /** Архивная позиция не предлагается в новых проектах (§28). */
   archived?: boolean;
   /** Версия схемы записи библиотеки (§57). */
@@ -111,6 +116,111 @@ export interface EdgeMaterial {
   schemaVersion?: number;
   libraryRef?: LibraryRef;
   metadata?: Record<string, unknown>;
+}
+
+/* EdgeSide объявлен выше (физическая сторона детали, а не сторона экрана, §3). */
+export const EDGE_SIDES: readonly EdgeSide[] = ['top', 'bottom', 'left', 'right'];
+
+/** Откуда взялась кромка (§4). Ручная переживает пересчёт правил. */
+export type EdgeSource = 'PARAMETRIC' | 'MANUAL';
+
+/** Состояние кромки (§5). */
+export type EdgeStatus = 'VALID' | 'WARNING' | 'ERROR' | 'OUTDATED';
+
+/**
+ * Направление кромки относительно детали (§20). Считается от геометрии, а не
+ * от названия стороны: у детали 300×800 «верх» идёт по короткой стороне.
+ */
+export type EdgeDirection = 'ALONG_LENGTH' | 'ALONG_WIDTH';
+
+/** Ручная правка параметров одной кромки (§45). */
+export interface EdgeOverride {
+  materialId?: EdgeMaterialId | null;
+  width?: Mm;
+  thickness?: Mm;
+}
+
+/**
+ * Кромка одной стороны детали (§2). ПРОИЗВОДНАЯ величина: вычисляется из
+ * Part.edges и библиотеки кромки при каждом обращении, поэтому при изменении
+ * размеров детали длина пересчитывается сама (§18) и второй системы деталей
+ * не появляется (§6).
+ */
+export interface EdgeBanding {
+  /** Стабильный id: `<partId>:<side>`. */
+  id: string;
+  partId: PartId;
+  side: EdgeSide;
+  materialId: EdgeMaterialId;
+  /** Толщина ленты (§7), мм. */
+  thickness: Mm;
+  /** Ширина ленты (§8), мм — не путать с толщиной. */
+  width: Mm;
+  /** Длина стороны детали (§9), мм. Без умножения на количество. */
+  length: Mm;
+  /** Количество деталей — множитель потребности (§42). */
+  quantity: number;
+  direction: EdgeDirection;
+  status: EdgeStatus;
+  source: EdgeSource;
+  /** Параметры правки пользователем (§45). */
+  override?: boolean;
+  /** Пояснение к статусу WARNING/ERROR. */
+  issue?: string;
+}
+
+/**
+ * Технологический профиль кромки (§50) — как данный материал кромки ведёт
+ * себя в производстве. Хранится в проекте рядом с самим материалом.
+ */
+export interface EdgeProfile {
+  materialId: EdgeMaterialId;
+  thickness: Mm;
+  width: Mm;
+  /** Цвет для карты раскроя и чертежа. */
+  display?: string;
+  /** Припуск на кромкование по умолчанию, мм. */
+  defaultAllowance?: Mm;
+}
+
+/** Готовый набор кромки по сторонам (§51). */
+export interface EdgePreset {
+  id: string;
+  name: string;
+  /** Материал на сторону; null — сторона без кромки. */
+  sides: Partial<Record<EdgeSide, EdgeMaterialId | null>>;
+  /** Категория деталей, для которой пресет предназначен (§54). */
+  role?: PartRole;
+  builtin?: boolean;
+}
+
+/** Состояние производной операции кромкования (§68). */
+export type EdgeOperationStatus = 'CURRENT' | 'DIRTY' | 'ERROR';
+
+/**
+ * Операция кромкования (§66/§67). Отдельная технологическая операция: с
+ * фурнитурой не связана (§65), с присадкой не смешивается.
+ */
+export interface EdgeOperation {
+  id: string;
+  partId: PartId;
+  side: EdgeSide;
+  materialId: EdgeMaterialId;
+  thickness: Mm;
+  width: Mm;
+  /** Длина с учётом количества деталей и припуска, мм. */
+  length: Mm;
+  operationType: 'EDGE_BANDING';
+  status: EdgeOperationStatus;
+}
+
+/** Рулон кромки (§35) — единица закупки и учёта остатков. */
+export interface EdgeRoll {
+  id: string;
+  materialId: EdgeMaterialId;
+  width: Mm;
+  thickness: Mm;
+  totalLength: Mm;
 }
 
 /**
@@ -223,6 +333,13 @@ export interface ManufacturingProfile {
   trimAllowance?: Mm;
   /** Минимальный размер делового остатка (§17). */
   minimumRemnant?: Mm;
+  /** Технологический припуск на кромкование, мм (§39). */
+  edgeCutAllowance?: Mm;
+  /**
+   * Округление ЗАКУПОЧНОЙ длины кромки, мм (§34/§72). Расчётная длина от
+   * округления не страдает: геометрия остаётся точной.
+   */
+  edgePurchaseRounding?: Mm;
   minHoleEdgeDistance: Mm;
   defaultDrillDepth: Mm;
   defaultJointType: ConnectionType;
@@ -427,6 +544,19 @@ export interface Part {
     top: EdgeMaterialId | null;
     bottom: EdgeMaterialId | null;
   };
+
+  /**
+   * Откуда взялась кромка каждой стороны (§4). Сторона, назначенная вручную,
+   * переживает пересчёт правил (§86). Поле необязательное: у деталей из
+   * проектов прошлых этапов его нет, и они считаются параметрическими (§97).
+   */
+  edgeSources?: Partial<Record<EdgeSide, EdgeSource>>;
+
+  /**
+   * Ручные правки параметров кромки по сторонам (§45). Пустое поле — все
+   * значения берутся из библиотеки кромки.
+   */
+  edgeOverrides?: Partial<Record<EdgeSide, EdgeOverride>>;
 
   position: Vec3;
   rotation: Rotation;

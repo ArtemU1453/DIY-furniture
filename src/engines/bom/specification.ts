@@ -5,6 +5,7 @@
  */
 import type { EdgeMaterial, Material, Part } from '@/core/model/types';
 import type { MaterialId, PartId } from '@/core/model/ids';
+import { bandingTotalLength, edgeBandingForPartWith } from '@/engines/edges';
 
 export interface SpecRow {
   partId: PartId;
@@ -61,11 +62,10 @@ export function buildSpecification(
     partCount += part.quantity;
     areaMm2 += length * width * part.quantity;
 
-    // Предварительная длина кромки: сумма облицованных сторон.
-    if (part.edges.left) edgeMm += part.height * part.quantity;
-    if (part.edges.right) edgeMm += part.height * part.quantity;
-    if (part.edges.top) edgeMm += part.width * part.quantity;
-    if (part.edges.bottom) edgeMm += part.width * part.quantity;
+    /* Длину кромки считает движок кромки (этап 21) — единый расчёт для
+     * спецификации, ведомости и производственного списка, поэтому цифры в
+     * разных документах не расходятся. */
+    edgeMm += edgeBandingForPartWith(edges, part).reduce((n, b) => n + bandingTotalLength(b), 0);
 
     rows.push({
       partId: part.id,

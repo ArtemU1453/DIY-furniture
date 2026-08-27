@@ -4,6 +4,11 @@ import { validatePart } from '@/core/validation';
 import { NumberField } from '../ui/NumberField';
 import { TextField } from '../ui/TextField';
 import type { EdgeSide } from '@/core/model/types';
+import type { EdgeMaterialId } from '@/core/model/ids';
+import {
+  bandingTotalLength, builtinPresets, defaultEdgeFor, edgeBandingForPart,
+  longSides, presetWithMaterial, shortSides, sideLength, type EdgeQuickAction,
+} from '@/engines/edges';
 
 const EDGE_LABELS: Array<[EdgeSide, string]> = [
   ['left', 'Левая'],
@@ -18,6 +23,11 @@ export function PropertiesPanel() {
   const materials = useEditorStore((s) => s.project.materials);
   const edges = useEditorStore((s) => s.project.edges);
   const updatePart = useEditorStore((s) => s.updatePart);
+  const project = useEditorStore((s) => s.project);
+  const setPartEdge = useEditorStore((s) => s.setPartEdge);
+  const applyQuickAction = useEditorStore((s) => s.applyEdgeQuickAction);
+  const applyPreset = useEditorStore((s) => s.applyEdgePreset);
+  const resetEdgeOverride = useEditorStore((s) => s.resetEdgeOverride);
   const removePart = useEditorStore((s) => s.removePart);
   const duplicatePart = useEditorStore((s) => s.duplicatePart);
   const setPartFlag = useEditorStore((s) => s.setPartFlag);
@@ -34,6 +44,15 @@ export function PropertiesPanel() {
   }
 
   const issues = validatePart(part);
+
+  // Кромка производна от Part.edges (§6): считаем её здесь, не храня отдельно.
+  const banding = edgeBandingForPart(project, part);
+  const bandingBySide = new Map(banding.map((b) => [b.side, b]));
+  const totalMm = banding.reduce((n, b) => n + bandingTotalLength(b), 0);
+  // Материал по умолчанию для быстрых действий: кромка плиты, иначе первая в библиотеке.
+  const defaultEdge = defaultEdgeFor(project, part) ?? edges[0]?.id ?? null;
+  const presets = builtinPresets(defaultEdge);
+  const quickAction = (action: EdgeQuickAction) => applyQuickAction([part.id], action, defaultEdge);
 
   return (
     <>
@@ -108,29 +127,81 @@ export function PropertiesPanel() {
 
       <div className="panel-section">
         <h3>Кромка</h3>
-        {EDGE_LABELS.map(([side, label]) => (
-          <div className="field" key={side}>
-            <label>{label}</label>
-            <select
-              value={part.edges[side] ?? ''}
-              onChange={(e) =>
-                updatePart(part.id, {
-                  edges: {
-                    ...part.edges,
-                    [side]: e.target.value ? (e.target.value as never) : null,
-                  },
-                })
-              }
-            >
-              <option value="">Нет</option>
-              {edges.map((ed) => (
-                <option key={ed.id} value={ed.id}>
-                  {ed.name}
-                </option>
-              ))}
-            </select>
+
+        {/* Быстрые действия (§15). Длинную/короткую сторону определяет
+            геометрия детали, а не порядок сторон в списке (§16). */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 8 }}>
+          <button style={{ fontSize: 11 }} onClick={() => quickAction('all')}>Кромить все</button>
+          <button style={{ fontSize: 11 }} onClick={() => quickAction('long')} disabled={longSides(part).length === 0}>Длинные</button>
+          <button style={{ fontSize: 11 }} onClick={() => quickAction('short')} disabled={shortSides(part).length === 0}>Короткие</button>
+          <button style={{ fontSize: 11 }} onClick={() => quickAction('none')}>Снять всю</button>
+        </div>
+
+        {/* Пресеты (§14/§51/§52) — применяются только к этой детали (§55). */}
+        <div className="field">
+          <label>Пресет</label>
+          <select
+            value=""
+            onChange={(e) => {
+              const preset = presets.find((x) => x.id === e.target.value);
+              if (preset) applyPreset([part.id], presetWithMaterial(preset, defaultEdge));
+            }}
+          >
+            <option value="">Применить пресет…</option>
+            {presets.map((preset) => (
+              <option key={preset.id} value={preset.id}>{preset.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {EDGE_LABELS.map(([side, label]) => {
+          const banding = bandingBySide.get(side);
+          return (
+            <div className="field" key={side}>
+              <label>
+                {label}
+                <span className="dim" style={{ fontSize: 10, marginLeft: 6 }}>
+                  {Math.round(sideLength(part, side))} мм
+                  {longSides(part).includes(side) ? ' · длинная' : shortSides(part).includes(side) ? ' · короткая' : ''}
+                </span>
+              </label>
+              <select
+                value={part.edges[side] ?? ''}
+                onChange={(e) => setPartEdge(part.id, side, e.target.value ? (e.target.value as EdgeMaterialId) : null)}
+              >
+                <option value="">Нет</option>
+                {edges.map((ed) => (
+                  <option key={ed.id} value={ed.id}>
+                    {ed.name}
+                  </option>
+                ))}
+              </select>
+              {banding && (
+                <div className="dim" style={{ fontSize: 10, marginTop: 2 }}>
+                  {/* §29: материал, толщина, ширина, длина, сторона. */}
+                  EB {banding.thickness}×{banding.width} мм · {Math.round(banding.length)} мм
+                  {banding.quantity > 1 && ` × ${banding.quantity}`}
+                  {banding.status !== 'VALID' && (
+                    <span className="issue warning" style={{ marginLeft: 4, padding: '0 3px' }}>{banding.status}</span>
+                  )}
+                  {banding.override && (
+                    <button
+                      style={{ fontSize: 10, marginLeft: 4 }}
+                      onClick={() => resetEdgeOverride(part.id, side)}
+                      title="Вернуть расчётное значение"
+                    >Сбросить правку</button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {totalMm > 0 && (
+          <div className="dim" style={{ fontSize: 11, marginTop: 6 }}>
+            Всего кромки: {(totalMm / 1000).toFixed(2)} м ({bandingBySide.size} стор.)
           </div>
-        ))}
+        )}
       </div>
 
       <div className="panel-section">
