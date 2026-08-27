@@ -23,6 +23,8 @@ import {
   newMachiningId,
   newMaterialId,
   newPartId,
+  newFurnitureId,
+  newAssemblyId,
 } from '@/core/model/ids';
 import {
   PARAMETRIC_KEY,
@@ -32,6 +34,11 @@ import {
   findParametricTemplate,
   generateParts,
   readParametricModel,
+  hasParametricModel,
+  findModuleTemplate,
+  moduleFromTemplate,
+  mirrorPart,
+  snapToGrid,
   resetOverride as resetPartOverrideFields,
   runCommand as runParametricCommandPure,
   type ParametricCommandType,
@@ -295,6 +302,24 @@ export interface EditorState {
   ) => ParametricApplyResult;
   /** Создать изделие из параметрического шаблона (§58–§60). */
   createParametricFurniture: (templateId: string, name?: string) => FurnitureId | null;
+
+  // ── Модули (этап 24) ──────────────────────────────────────────────────────
+  /** Создать модуль из шаблона (§109). */
+  createModuleFromTemplate: (templateId: string, name?: string) => FurnitureId | null;
+  /** Дублировать изделие целиком с новыми идентификаторами (§81/§82). */
+  duplicateFurniture: (id: FurnitureId, name?: string) => FurnitureId | null;
+  /** Зеркально отразить изделие: кромка и присадка переезжают (§83/§84). */
+  mirrorFurniture: (id: FurnitureId) => boolean;
+  /** Повернуть изделие в сцене, не меняя размеров деталей (§85/§86). */
+  rotateFurniture: (id: FurnitureId, rotation: 0 | 90 | 180 | 270) => boolean;
+  /** Переместить изделие с необязательной привязкой к сетке (§87–§90). */
+  moveFurniture: (id: FurnitureId, position: { x?: number; y?: number; z?: number }, gridStep?: number) => boolean;
+  /** Показать/скрыть изделие (§96). */
+  setFurnitureVisible: (id: FurnitureId, visible: boolean) => void;
+  /** Заблокировать изделие от случайного перемещения (§97/§98). */
+  setFurnitureLocked: (id: FurnitureId, locked: boolean) => void;
+  /** Изменить общий параметр у нескольких изделий (§118/§119). */
+  applyToModules: (ids: FurnitureId[], key: 'width' | 'height' | 'depth' | 'thickness', value: number) => { applied: number; skipped: number };
   /** Ручная правка параметрической детали (§43). */
   setPartOverride: (partId: PartId, patch: PartOverride) => void;
   /** «Вернуть расчётное значение» (§44). */
@@ -743,6 +768,138 @@ export const useEditorStore = create<EditorState>()(
         const applied = get().applyParametricModel(id, command.model);
         // Описание команды информативнее описания диффа.
         return applied.ok ? { ...applied, description: command.description } : applied;
+      },
+
+      createModuleFromTemplate: (templateId, name) => {
+        const template = findModuleTemplate(templateId);
+        if (!template) return null;
+        const module = moduleFromTemplate(template, name);
+        const project = get().project;
+        const body = project.materials.find((m) => m.kind === 'ldsp') ?? project.materials[0];
+        const model: ParametricModel = { ...module.parameters, materialId: body?.id ?? null };
+        if (body) model.thickness = body.thickness;
+
+        const furniture = createFurniture(module.name);
+        furniture.type = 'cabinet';
+        const result = generateParts(model, []);
+        /* Соединения создаются в ТОМ ЖЕ commit, что и детали: иначе undo
+         * откатил бы детали, оставив узлы от прежней конструкции. */
+        const reconciled = reconcileConnections(project, result.parts, {
+          jointCategory: model.jointType,
+          construction: model.construction,
+          handles: model.doors.handleEnabled,
+        });
+        commit((p) => {
+          furniture.params = { [PARAMETRIC_KEY]: model } as Record<string, unknown>;
+          furniture.metadata = { ...(furniture.metadata ?? {}), moduleTemplateId: template.id };
+          if (furniture.assemblies[0]) furniture.assemblies[0].parts = result.parts;
+          p.furnitures.push(furniture);
+          p.hardwareConnections = [...p.hardwareConnections, ...reconciled.connections];
+        });
+        set((s) => void (s.activeFurnitureId = furniture.id));
+        return furniture.id;
+      },
+
+      /* Копия получает НОВЫЕ идентификаторы (§82): иначе копия и оригинал
+       * делили бы детали, и правка одной меняла бы другую. */
+      duplicateFurniture: (id, name) => {
+        const source = findFurniture(get().project, id);
+        if (!source) return null;
+        const copy = structuredClone(source);
+        copy.id = newFurnitureId();
+        copy.name = name ?? `${source.name} (копия)`;
+        const idMap = new Map<string, PartId>();
+        for (const assembly of copy.assemblies) {
+          assembly.id = newAssemblyId();
+          assembly.parts = assembly.parts.map((part) => {
+            const fresh = newPartId();
+            idMap.set(String(part.id), fresh);
+            return { ...part, id: fresh };
+          });
+        }
+        // Узлы копии ссылаются на её собственные детали, а не на оригинал.
+        const connections = get().project.hardwareConnections
+          .filter((c) => idMap.has(String(c.partAId)) && idMap.has(String(c.partBId)))
+          .map((c) => ({
+            ...c,
+            id: newHardwareConnectionId(),
+            partAId: idMap.get(String(c.partAId))!,
+            partBId: idMap.get(String(c.partBId))!,
+          }));
+        commit((p) => {
+          p.furnitures.push(copy);
+          p.hardwareConnections.push(...connections);
+        });
+        return copy.id;
+      },
+
+      mirrorFurniture: (id) => {
+        const furniture = findFurniture(get().project, id);
+        if (!furniture || furniture.metadata?.locked === true) return false;
+        commit((p) => {
+          const target = findFurniture(p, id);
+          if (!target) return;
+          for (const assembly of target.assemblies) {
+            assembly.parts = assembly.parts.map(mirrorPart);
+          }
+          target.metadata = { ...(target.metadata ?? {}), mirrored: !(target.metadata?.mirrored === true) };
+        });
+        return true;
+      },
+
+      rotateFurniture: (id, rotation) => {
+        const furniture = findFurniture(get().project, id);
+        if (!furniture || furniture.metadata?.locked === true) return false;
+        commit((p) => {
+          const target = findFurniture(p, id);
+          // §86: меняется только разворот изделия, локальные размеры деталей нет.
+          if (target) target.rotation = { ...target.rotation, y: rotation };
+        });
+        return true;
+      },
+
+      moveFurniture: (id, position, gridStep = 0) => {
+        const furniture = findFurniture(get().project, id);
+        if (!furniture || furniture.metadata?.locked === true) return false;
+        commit((p) => {
+          const target = findFurniture(p, id);
+          if (!target) return;
+          const snap = (v: number) => snapToGrid(v, gridStep);
+          target.position = {
+            x: position.x != null ? snap(position.x) : target.position.x,
+            y: position.y != null ? snap(position.y) : target.position.y,
+            z: position.z != null ? snap(position.z) : target.position.z,
+          };
+        });
+        return true;
+      },
+
+      setFurnitureVisible: (id, visible) =>
+        commit((p) => {
+          const target = findFurniture(p, id);
+          if (target) target.metadata = { ...(target.metadata ?? {}), hidden: !visible };
+        }),
+
+      setFurnitureLocked: (id, locked) =>
+        commit((p) => {
+          const target = findFurniture(p, id);
+          if (target) target.metadata = { ...(target.metadata ?? {}), locked };
+        }),
+
+      applyToModules: (ids, key, value) => {
+        let applied = 0;
+        let skipped = 0;
+        for (const id of ids) {
+          const furniture = findFurniture(get().project, id);
+          const model = furniture ? readParametricModel(furniture) : null;
+          // §119: у изделия без параметрической модели такого параметра нет —
+          // молча выдумывать его нельзя.
+          if (!furniture || !model || !hasParametricModel(furniture)) { skipped += 1; continue; }
+          const res = get().applyParametricModel(id, { ...model, [key]: value });
+          if (res.ok) applied += 1;
+          else skipped += 1;
+        }
+        return { applied, skipped };
       },
 
       createParametricFurniture: (templateId, name) => {

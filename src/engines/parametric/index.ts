@@ -150,3 +150,39 @@ export {
   fromCabinetParameters,
   type ParametricTemplate,
 } from './templates';
+export {
+  IDENTITY_TRANSFORM, MODULE_SCHEMA_VERSION, transformOf, isVisible, isLocked,
+  type ModuleStatusKind, type ModuleRotation, type ModuleTransform,
+} from './modules';
+export {
+  footprint, moveModule, translateModule, rotateModule, rotateBy, mirrorModule,
+  mirrorPart, MIRROR_SIDE, GRID_STEPS, snapToGrid, snapToModules,
+  alignModules, distributeModules, type AlignEdge,
+} from './transform';
+export {
+  createGroup, newGroupId, groupModules, groupBounds, moveGroup, rotateGroup,
+  ungroup, groupOfModule, rotateWithinGroup, type ModuleGroup,
+} from './groups';
+export {
+  MODULE_TEMPLATES, findModuleTemplate, moduleFromTemplate, templateOfModule,
+  type ModuleTemplate,
+} from './moduleTemplates';
+export {
+  MODULE_LIBRARY_FORMAT, toLibraryEntry, fromLibraryEntry, migrateModule,
+  readModule, importModuleLibrary, exportModuleLibrary, exportModule,
+  type ModuleLibraryEntry, type ModuleLibraryFile, type ModuleImportResult,
+} from './moduleLibrary';
+export {
+  linkStatus, breakLink, resetLink, moduleScope, resolveParameter,
+  resolveLinkedParameters, hasParameter, commonValue, applyToAll,
+  type LinkStatus, type ResolvedParameter, type ModuleParameterKey,
+} from './link';
+export {
+  modulePartKeys, modulePartsOf, moduleOfPart, moduleSummary, moduleDocuments,
+  highlightForModule, type ModuleSummary,
+} from './moduleQueries';
+export {
+  DEPENDENT_SECTIONS, markDirty, statusOfModule, generateModule,
+  invalidateModule, dirtyModules, invalidatedSections, refreshStatuses,
+  type ModuleGenerationOutcome, type DependentSection,
+} from './moduleStatus';
