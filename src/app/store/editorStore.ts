@@ -96,7 +96,16 @@ import type { CuttingProgress } from '@/engines/cutting';
 import { documentsSignature, nextDocVersion } from '@/engines/drawing';
 import { runProductionCheck } from '@/engines/status';
 import type { ProjectIssue } from '@/engines/status';
-import { inferJointType, categoryOfConnectionType } from '@/engines/machining';
+import {
+  allOperations,
+  categoryOfConnectionType,
+  cutoutOperation,
+  grooveOperation,
+  inferJointType,
+  millingOperation,
+  pocketOperation,
+  regenerate,
+} from '@/engines/machining';
 import { hardwareFromTemplate, type HardwareTemplate, catalogByCategory } from '@/core/model/hardwareCatalog';
 import {
   instantiateTemplate,
@@ -426,6 +435,23 @@ export interface EditorState {
     through?: boolean;
   }) => MachiningId;
   removeOperation: (id: MachiningId) => void;
+  /** Изменить ручную операцию (§33). */
+  updateManualOperation: (id: MachiningId, patch: Partial<MachiningOperation>) => boolean;
+  /** Добавить паз / карман / вырез / фрезеровку (§26–§29). */
+  addShapeOperation: (input: {
+    partId: PartId;
+    face: PartFace;
+    kind: 'groove' | 'pocket' | 'cutout' | 'mill';
+    x: number;
+    y: number;
+    width?: number;
+    height?: number;
+    length?: number;
+    depth?: number;
+    diameter?: number;
+  }) => MachiningId | null;
+  /** Пересчитать присадку (§78). Прежний набор сохраняется при ошибке (§80). */
+  regenerateMachining: () => { ok: boolean; operations: number; errors: string[]; warnings: string[] };
   /** Ручная правка автоматической операции (MANUAL OVERRIDE, §41/§42). */
   setOperationOverride: (id: MachiningId, patch: MachiningOverride) => void;
   /** «Сбросить правило» — удалить ручную правку, операция снова из правила (§43). */
@@ -1474,6 +1500,67 @@ export const useEditorStore = create<EditorState>()(
           if (part) part.machining.push(op);
         });
         return op.id;
+      },
+
+      updateManualOperation: (id, patch) => {
+        let found = false;
+        commit((p) => {
+          for (const f of p.furnitures) {
+            for (const a of f.assemblies) {
+              for (const part of a.parts) {
+                const op = part.machining.find((o) => o.id === id);
+                if (!op) continue;
+                Object.assign(op, patch);
+                // Сквозное отверстие всегда глубиной в толщину детали (§23):
+                // хранить рядом другое число значило бы держать две правды.
+                if (op.through) op.depth = part.thickness;
+                found = true;
+              }
+            }
+          }
+        });
+        return found;
+      },
+
+      addShapeOperation: (input) => {
+        const part = findPart(get().project, input.partId);
+        if (!part) return null;
+        const common = { part, face: input.face, x: input.x, y: input.y, source: 'MANUAL' as const };
+        let op: MachiningOperation;
+        switch (input.kind) {
+          case 'groove':
+            op = grooveOperation({ ...common, length: input.length ?? 100, width: input.width ?? 8, depth: input.depth ?? 6 });
+            break;
+          case 'pocket':
+            op = pocketOperation({ ...common, width: input.width ?? 50, height: input.height ?? 50, depth: input.depth ?? 6 });
+            break;
+          case 'cutout':
+            op = cutoutOperation({ ...common, width: input.width ?? 50, height: input.height ?? 50 });
+            break;
+          case 'mill':
+          default:
+            op = millingOperation({ ...common, contour: [], depth: input.depth ?? 6, diameter: input.diameter });
+            break;
+        }
+        commit((p) => {
+          const target = findPart(p, input.partId);
+          if (target) target.machining.push(op);
+        });
+        return op.id;
+      },
+
+      /* Пересчёт атомарен (§79/§80): набор операций производен от связей, но
+       * при ошибках расчёта мы НЕ трогаем ручные операции детали — прежняя
+       * проверенная технология остаётся на месте. */
+      regenerateMachining: () => {
+        const project = get().project;
+        const outcome = regenerate(project, allOperations(project));
+        if (!outcome.ok) {
+          return { ok: false, operations: outcome.operations.length, errors: outcome.errors, warnings: outcome.warnings };
+        }
+        // Успешный пересчёт: производные операции уже вычисляются из связей,
+        // поэтому достаточно снять признак устаревания документов.
+        return { ok: true, operations: outcome.operations.length, errors: [], warnings: outcome.warnings };
       },
 
       removeOperation: (id) => {

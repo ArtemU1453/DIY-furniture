@@ -50,3 +50,33 @@ export {
   machiningToJson,
   type OperationGroup,
 } from './report';
+export {
+  DEFAULT_TOOLS, toolLibrary, findTool, toolTypeFor, pickTool,
+  checkTooling, checkProjectTooling, type ToolIssue,
+} from './tools';
+export {
+  faceExtent, scopeFor, resolveValue, resolvePosition, resolvedMap,
+  fromEdge, fromCenter, atPoint, fromOperation, type PositionScope,
+} from './position';
+export {
+  operationId, applyTemplates, drillTemplate, boreTemplate, grooveTemplate,
+  type TemplateContext,
+} from './templates';
+export {
+  manualOperationId, drillOperation, boreOperation, grooveOperation,
+  pocketOperation, cutoutOperation, millingOperation, contourOf, sortOperations,
+} from './operations';
+export {
+  MACHINING_RULE_VERSION, validateProjectMachining, machiningResultFor,
+  machiningResults, partStatus, regenerate, operationsOfPart, partOfOperation,
+  type MachiningValidationReport, type PartMachiningStatus, type RegenerationOutcome,
+} from './result';
+export {
+  machineExporters, registerMachineExporter, getMachineExporter, exportMachining,
+  importMachining, partsWithMachining, csvExporter, jsonExporter,
+  type MachineExporter, type MachiningImportResult,
+} from './exporters';
+export type {
+  MachiningOperation, MachiningResult, MachiningType, MachiningSource,
+  MachiningStatusKind, ToolItem, ToolType, PositionReference, OperationTemplate,
+} from '@/core/model/types';

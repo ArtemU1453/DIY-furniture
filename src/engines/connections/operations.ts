@@ -22,6 +22,9 @@ const TYPE_TO_KIND: Record<MachiningType, OperationKind> = {
   pocket: 'POCKET',
   slot: 'POCKET',
   cut: 'CUT',
+  groove: 'POCKET',
+  cutout: 'CUT',
+  mill: 'POCKET',
   custom: 'CUSTOM',
 };
 

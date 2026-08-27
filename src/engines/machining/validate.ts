@@ -81,7 +81,11 @@ export function validateBounds(
     issues.push({
       severity: 'error',
       code: 'machining.outOfBounds',
-      message: `Операция ${label}: отверстие вне детали ${part.name}.`,
+      /* Сообщение адресовано человеку у станка: по диаметру и координатам он
+       * сразу найдёт операцию, а по габариту поймёт, насколько она промахнулась. */
+      message: op.diameter != null
+        ? `Отверстие Ø${op.diameter} (${label}) выходит за границы детали ${part.name}: X ${Math.round(op.x)}, Y ${Math.round(op.y)} при ${Math.round(part.width)}×${Math.round(part.height)} мм.`
+        : `Операция ${label} выходит за границы детали ${part.name}: X ${Math.round(op.x)}, Y ${Math.round(op.y)} при ${Math.round(part.width)}×${Math.round(part.height)} мм.`,
       operationId: op.id,
     });
     return issues;
