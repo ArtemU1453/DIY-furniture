@@ -14,7 +14,12 @@ import { HardwareView } from '@/components/panels/HardwareView';
 import { MachiningView } from '@/components/panels/MachiningView';
 import { CuttingView } from '@/components/panels/CuttingView';
 import { DocumentsView } from '@/components/panels/DocumentsView';
-import { Scene3D } from '@/features/designer/Scene3D';
+import { Scene3D, type CameraApi } from '@/features/designer/Scene3D';
+import { ModelTree } from '@/components/panels/ModelTree';
+import { PartProperties } from '@/components/panels/PartProperties';
+import { EditorToolbar } from '@/components/panels/EditorToolbar';
+import { overallDimensions } from '@/engines/viewer';
+import { allParts } from '@/core/model/selectors';
 import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { saveCurrentProject } from '@/features/project/projectActions';
@@ -28,14 +33,16 @@ export function App() {
   const [centerView, setCenterView] = useState<CenterView>('3d');
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
   const [showNumbers, setShowNumbers] = useState(false);
-  const [showMachining, setShowMachining] = useState(false);
-  const [showHardware, setShowHardware] = useState(true);
   const [bodyMode, setBodyMode] = useState<'construction' | 'body'>('construction');
+  const [showTree, setShowTree] = useState(true);
+  const captureRef = useRef<{ capture: () => string } | null>(null);
+  const cameraRef = useRef<CameraApi | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
+  const project = useEditorStore((s) => s.project);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
 
@@ -130,12 +137,8 @@ export function App() {
                 № деталей
               </label>
               <label className="num-toggle" style={{ marginLeft: 12 }}>
-                <input type="checkbox" checked={showMachining} onChange={(e) => setShowMachining(e.target.checked)} />
-                Присадка
-              </label>
-              <label className="num-toggle" style={{ marginLeft: 12 }}>
-                <input type="checkbox" checked={showHardware} onChange={(e) => setShowHardware(e.target.checked)} />
-                Показать фурнитуру
+                <input type="checkbox" checked={showTree} onChange={(e) => setShowTree(e.target.checked)} />
+                Дерево модели
               </label>
               <span className="sep" style={{ margin: '0 6px' }} />
               {(['construction', 'body'] as const).map((m) => (
@@ -148,17 +151,41 @@ export function App() {
         </div>
         <div className="center-body">
           {centerView === '3d' && (
-            <div style={{ display: 'flex', height: '100%', width: '100%' }}>
-              {(viewMode === '2d' || viewMode === 'split') && (
-                <div style={{ flex: 1, minWidth: 0, borderRight: viewMode === 'split' ? '1px solid var(--border)' : undefined }}>
-                  <View2D />
-                </div>
-              )}
-              {(viewMode === '3d' || viewMode === 'split') && (
-                <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-                  <Scene3D showNumbers={showNumbers} showMachining={showMachining} showHardware={showHardware} bodyMode={bodyMode} />
-                </div>
-              )}
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', minHeight: 0 }}>
+              <EditorToolbar
+                onSetView={(v) => cameraRef.current?.setView(v)}
+                onFit={() => cameraRef.current?.fitAll(overallDimensions(allParts(project)))}
+                onCapture={() => {
+                  const data = captureRef.current?.capture();
+                  if (!data) return;
+                  const a = document.createElement('a');
+                  a.href = data;
+                  a.download = `${project.name || 'scene'}.png`;
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                }}
+              />
+              <div style={{ display: 'flex', flex: 1, minHeight: 0, width: '100%' }}>
+                {showTree && (
+                  <aside style={{ width: 210, borderRight: '1px solid var(--border)', minHeight: 0 }}>
+                    <ModelTree />
+                  </aside>
+                )}
+                {(viewMode === '2d' || viewMode === 'split') && (
+                  <div style={{ flex: 1, minWidth: 0, borderRight: '1px solid var(--border)' }}>
+                    <View2D />
+                  </div>
+                )}
+                {(viewMode === '3d' || viewMode === 'split') && (
+                  <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+                    <Scene3D showNumbers={showNumbers} bodyMode={bodyMode} captureRef={captureRef} cameraRef={cameraRef} />
+                  </div>
+                )}
+                <aside style={{ width: 230, borderLeft: '1px solid var(--border)', minHeight: 0 }}>
+                  <PartProperties />
+                </aside>
+              </div>
             </div>
           )}
           {centerView === 'table' && <PartsTable />}

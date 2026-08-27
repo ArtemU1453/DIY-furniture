@@ -1,39 +1,17 @@
-export type StandardView =
-  | 'perspective'
-  | 'front'
-  | 'back'
-  | 'left'
-  | 'right'
-  | 'top'
-  | 'bottom';
+import { VIEW_LABELS, VIEW_PRESETS, type StandardView } from '@/engines/viewer';
 
-const D = 3; // расстояние камеры (в метрах three)
+export type { StandardView };
 
-/** Позиции камеры для стандартных видов (три-единицы). */
-export const VIEW_POSITIONS: Record<StandardView, [number, number, number]> = {
-  perspective: [2.4, 1.8, 2.4],
-  front: [0, 0, D],
-  back: [0, 0, -D],
-  left: [-D, 0, 0],
-  right: [D, 0, 0],
-  top: [0, D, 0.001],
-  bottom: [0, -D, 0.001],
+/** Позиции камеры для стандартных видов (единая таблица из engines/viewer). */
+export const VIEW_POSITIONS: Record<StandardView | 'perspective', [number, number, number]> = {
+  ...VIEW_PRESETS,
+  perspective: VIEW_PRESETS.isometric,
 };
-
-const LABELS: Array<[StandardView, string]> = [
-  ['perspective', 'Перспектива'],
-  ['front', 'Спереди'],
-  ['back', 'Сзади'],
-  ['left', 'Слева'],
-  ['right', 'Справа'],
-  ['top', 'Сверху'],
-  ['bottom', 'Снизу'],
-];
 
 export function ViewControls({ onSetView }: { onSetView: (view: StandardView) => void }) {
   return (
     <div className="view-toolbar">
-      {LABELS.map(([view, label]) => (
+      {VIEW_LABELS.map(([view, label]) => (
         <button key={view} onClick={() => onSetView(view)} title={label}>
           {label}
         </button>
