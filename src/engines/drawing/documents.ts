@@ -21,6 +21,7 @@ import { buildProductionReport } from './report';
 import { buildTitlePageDocument } from './titlePage';
 import { buildGeneralViewDocument } from './generalView';
 import { buildMaterialListDocument } from './materialList';
+import { buildEdgeListDocument } from './edgeList';
 import { buildMachiningListDocument } from './machiningList';
 import type { DocumentType, DrawingDocument, ScaleValue, SheetFormat, ViewName } from './sheet';
 
@@ -49,6 +50,7 @@ export const DOCUMENT_LIST: DocumentDescriptor[] = [
   { key: 'machiningList', type: 'MACHINING_LIST', title: 'Ведомость присадки' },
   { key: 'hardwareList', type: 'HARDWARE_LIST', title: 'Спецификация фурнитуры' },
   { key: 'materialList', type: 'MATERIAL_LIST', title: 'Ведомость материалов' },
+  { key: 'edgeList', type: 'EDGE_LIST', title: 'Ведомость кромки' },
   { key: 'summary', type: 'PROJECT_SUMMARY', title: 'Итоговая информация' },
   // Документы предыдущих этапов — доступны, но не входят в основную структуру.
   { key: 'machining', type: 'MACHINING_DRAWING', title: 'Присадка (чертежи)' },
@@ -105,6 +107,7 @@ export function buildDocument(project: Project, key: string): DrawingDocument {
     case 'partsList': return buildPartsListDocument(project);
     case 'hardwareList': return buildHardwareListDocument(project);
     case 'materialList': return buildMaterialListDocument(project);
+    case 'edgeList': return buildEdgeListDocument(project);
     case 'machiningList': return buildMachiningListDocument(project);
     case 'parts': return buildPartsDocument(project, { filter: settings.partFilter, revision: settings.revision });
     case 'machining': return buildMachiningDocument(project);

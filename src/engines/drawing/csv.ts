@@ -17,11 +17,11 @@ const toCsv = (header: string[], rows: string[][]): string =>
 
 /** parts.csv — спецификация деталей (§23). */
 export function partsListCsv(project: Project): string {
-  const header = ['Позиция', 'ID', 'Наименование', 'Количество', 'Длина', 'Ширина', 'Толщина', 'Материал', 'Кромка', 'Соединений', 'Примечание'];
+  const header = ['Позиция', 'ID', 'Наименование', 'Количество', 'Длина', 'Ширина', 'Толщина', 'Материал', 'Кромка', 'Кромок', 'Соединений', 'Примечание'];
   const rows = partsListRows(project).map((r) => [
     String(r.position), r.ids, r.name, String(r.quantity),
     fmtMm(r.length), fmtMm(r.width), fmtMm(r.thickness), r.material, r.edge,
-    String(r.connections), r.note,
+    String(r.edgeCount), String(r.connections), r.note,
   ]);
   return toCsv(header, rows);
 }

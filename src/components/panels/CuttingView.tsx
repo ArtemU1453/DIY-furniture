@@ -9,6 +9,7 @@ import {
 import { SORT_STRATEGIES } from '@/engines/cutting';
 import { printPages, downloadSvg } from '@/features/documents/print';
 import { allParts } from '@/core/model/selectors';
+import { rotateSideFlags } from '@/engines/edges';
 import { CuttingMap, type CuttingMapHandle, type EdgeFlags } from './CuttingMap';
 import { SheetLibraryDialog } from './SheetLibraryDialog';
 import { RemnantLibraryDialog } from './RemnantLibraryDialog';
@@ -164,8 +165,10 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
     if (!part) return undefined;
     const has = (e: unknown) => e != null;
     const base = { left: has(part.edges.left), right: has(part.edges.right), top: has(part.edges.top), bottom: has(part.edges.bottom) };
-    // При повороте на 90° стороны меняются местами.
-    return p.rotation === 90 ? { left: base.bottom, right: base.top, top: base.left, bottom: base.right } : base;
+    /* Кромка приклеена к ФИЗИЧЕСКОЙ стороне детали (§21/§24): поворот на
+     * листе только меняет, где эта сторона видна, и не может кромку потерять.
+     * Пересчёт делает движок, чтобы карта и расчёт не разъезжались. */
+    return rotateSideFlags(base, p.rotation);
   };
 
   const exportSvg = () => {

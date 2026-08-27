@@ -276,7 +276,7 @@ describe('Документы 11 — раскладка, валидатор, эк
   });
 
   it('Тест 14: CSV — стабильные колонки', () => {
-    expect(partsListCsv(project()).split('\n')[0]).toBe('Позиция,ID,Наименование,Количество,Длина,Ширина,Толщина,Материал,Кромка,Соединений,Примечание');
+    expect(partsListCsv(project()).split('\n')[0]).toBe('Позиция,ID,Наименование,Количество,Длина,Ширина,Толщина,Материал,Кромка,Кромок,Соединений,Примечание');
     const parts = allParts(project());
     store().addConnection({ hardwareId: project().hardware[0].id, partAId: parts[0].id, partBId: parts[1].id });
     expect(hardwareListCsv(project()).split('\n')[0]).toBe('№,ID,Наименование,Тип,Артикул,Количество');

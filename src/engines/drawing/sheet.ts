@@ -18,6 +18,7 @@ export type DocumentType =
   | 'HARDWARE_LIST'
   | 'MACHINING_LIST'
   | 'MATERIAL_LIST'
+  | 'EDGE_LIST'
   | 'PROJECT_SUMMARY'
   /* Ниже — типы предыдущих этапов; сохранены, чтобы не ломать существующие
    * документы и сохранённые проекты. */
