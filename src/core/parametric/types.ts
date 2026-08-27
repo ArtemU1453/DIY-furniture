@@ -236,7 +236,20 @@ export const DEFAULT_DRAWERS: DrawerSettings = { count: 0, frontHeight: 0, gap: 
 
 // ── Параметрическая модель изделия (§3) ──────────────────────────────────────
 
-export type FurnitureKind = 'CABINET' | 'SHELVING' | 'BASE_CABINET';
+/**
+ * Тип изделия/модуля (§3). SHELVING сохранён с этапа 18 как синоним
+ * стеллажа — проекты прошлых этапов продолжают открываться.
+ */
+export type FurnitureKind =
+  | 'CABINET'
+  | 'BASE_CABINET'
+  | 'WALL_CABINET'
+  | 'TALL_CABINET'
+  | 'DRAWER_UNIT'
+  | 'SHELF_UNIT'
+  | 'OPEN_SHELF'
+  | 'CUSTOM'
+  | 'SHELVING';
 
 export interface ParametricModel {
   /** Тип изделия (§57). */

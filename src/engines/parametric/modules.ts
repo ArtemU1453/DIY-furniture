@@ -8,6 +8,35 @@
 import type { ParametricModel } from '@/core/parametric/types';
 import { createParametricModel } from '@/core/parametric/types';
 
+/** Состояние модуля (§65). */
+export type ModuleStatusKind = 'VALID' | 'WARNING' | 'ERROR' | 'DIRTY' | 'OUTDATED';
+
+/** Допустимые повороты модуля в плане (§85). */
+export type ModuleRotation = 0 | 90 | 180 | 270;
+
+/**
+ * Размещение модуля в сцене (§85–§87).
+ *
+ * Поворот и зеркало живут ЗДЕСЬ, а не в деталях (§86): локальные размеры
+ * деталей от разворота шкафа не меняются, меняется только то, как модуль
+ * стоит в сцене. Иначе поворот на 90° «портил» бы раскрой и чертежи.
+ */
+export interface ModuleTransform {
+  position: { x: number; y: number; z: number };
+  rotation: ModuleRotation;
+  /** Зеркальное отражение по ширине (левый шкаф ↔ правый). */
+  mirrored: boolean;
+}
+
+export const IDENTITY_TRANSFORM: ModuleTransform = {
+  position: { x: 0, y: 0, z: 0 },
+  rotation: 0,
+  mirrored: false,
+};
+
+/** Версия схемы модуля (§105). Растёт, когда меняется структура. */
+export const MODULE_SCHEMA_VERSION = 1;
+
 export interface FurnitureModule {
   id: string;
   type: ParametricModel['kind'];
@@ -16,8 +45,39 @@ export interface FurnitureModule {
   /** Ключи деталей, порождённых этим модулем. */
   parts: string[];
   children: FurnitureModule[];
-  /** Смещение модуля относительно родителя, мм. */
+  /** Смещение модуля относительно родителя, мм. Сохранено с этапа 18. */
   offset?: { x: number; y: number; z: number };
+  /** Размещение в сцене (§85–§87). */
+  transform?: ModuleTransform;
+  /** Скрытый модуль не показывается в 3D, но остаётся в проекте (§96). */
+  visible?: boolean;
+  /** Заблокированный модуль нельзя случайно сдвинуть (§97/§98). */
+  locked?: boolean;
+  /** Состояние модуля (§65). */
+  status?: ModuleStatusKind;
+  schemaVersion?: number;
+  metadata?: Record<string, unknown>;
+}
+
+/** Размещение модуля с подстановкой значений по умолчанию. */
+export function transformOf(module: FurnitureModule): ModuleTransform {
+  const base = module.transform ?? IDENTITY_TRANSFORM;
+  // Смещение этапа 18 остаётся действительным: модули прошлых проектов
+  // продолжают стоять там же, где стояли.
+  if (!module.transform && module.offset) {
+    return { ...IDENTITY_TRANSFORM, position: { ...module.offset } };
+  }
+  return { position: { ...base.position }, rotation: base.rotation, mirrored: base.mirrored };
+}
+
+/** Виден ли модуль (§96). Отсутствие поля означает «виден». */
+export function isVisible(module: FurnitureModule): boolean {
+  return module.visible !== false;
+}
+
+/** Заблокирован ли модуль (§97). */
+export function isLocked(module: FurnitureModule): boolean {
+  return module.locked === true;
 }
 
 let counter = 0;
@@ -33,6 +93,12 @@ export function createModule(patch: Partial<FurnitureModule> = {}): FurnitureMod
     parts: patch.parts ?? [],
     children: patch.children ?? [],
     offset: patch.offset,
+    transform: patch.transform ?? { ...IDENTITY_TRANSFORM, position: { ...IDENTITY_TRANSFORM.position } },
+    visible: patch.visible ?? true,
+    locked: patch.locked ?? false,
+    status: patch.status ?? 'VALID',
+    schemaVersion: patch.schemaVersion ?? MODULE_SCHEMA_VERSION,
+    metadata: patch.metadata,
   };
 }
 
