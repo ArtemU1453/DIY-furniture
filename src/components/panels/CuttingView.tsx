@@ -3,6 +3,7 @@ import { useEditorStore } from '@/app/store/editorStore';
 import {
   isCuttingStale, m2, reportToCsv, reportToJson, resultToSvg, sheetToSvg,
   cuttingPartsCsv, wasteReportCsv, compareAlgorithms, listCuttingEngines,
+  cuttingCsv, remnantsCsv, cuttingSummary, instanceCounts, placementLabel, parseInstance,
   type AlgorithmComparisonRow,
 } from '@/engines/cutting';
 import { SORT_STRATEGIES } from '@/engines/cutting';
@@ -32,7 +33,16 @@ const MODE_LABELS: Record<OptimizationMode, string> = {
   MAX_UTILIZATION: 'Макс. использование',
 };
 
-export function CuttingView({ onOpenDrawing }: { onOpenDrawing?: (partId: PartId) => void } = {}) {
+interface CuttingViewProps {
+  /** Открыть чертёж детали (§86). */
+  onOpenDrawing?: (partId: PartId) => void;
+  /** Открыть деталь в 3D с подсветкой (§85). */
+  onOpenIn3D?: (partId: PartId) => void;
+  /** Открыть карточку детали в редакторе (§84). */
+  onOpenPart?: (partId: PartId) => void;
+}
+
+export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingViewProps = {}) {
   const project = useEditorStore((s) => s.project);
   const running = useEditorStore((s) => s.cuttingRunning);
   const progress = useEditorStore((s) => s.cuttingProgress);
@@ -97,6 +107,30 @@ export function CuttingView({ onOpenDrawing }: { onOpenDrawing?: (partId: PartId
     for (const s of sheets) if (s.placements.some((pl) => pl.pieceId === selectedPieceId)) return s.index;
     return 0;
   }, [sheets, selectedPieceId]);
+
+  /* Сводка по материалам (§74/§76): по строке на задание, ЛДСП 16 и МДФ 18
+   * считаются раздельно и не смешиваются. */
+  const summary = useMemo(() => {
+    if (!report) return [];
+    const thickness: Record<string, number> = {};
+    const formats: Record<string, string> = {};
+    for (const m of project.materials) thickness[String(m.id)] = m.thickness;
+    for (const sh of project.sheets) formats[sh.id] = sh.name;
+    return cuttingSummary(report, thickness, formats);
+  }, [report, project.materials, project.sheets]);
+
+  const counts = useMemo(() => instanceCounts(sheets.flatMap((s) => s.placements)), [sheets]);
+
+  /* Карточка выбранного экземпляра (§41/§82): показывает и деталь, и номер
+   * её экземпляра — «P001, экземпляр 3», а не безымянный прямоугольник. */
+  const selectedInfo = useMemo(() => {
+    if (!selectedPlacement) return null;
+    const part = allParts(project).find((x) => x.id === selectedPlacement.partId);
+    const material = part?.material ? project.materials.find((m) => m.id === part.material) : undefined;
+    const instance = parseInstance(selectedPlacement.pieceId);
+    const total = counts.get(String(selectedPlacement.partId)) ?? 1;
+    return { part, material, instance, total, label: placementLabel(selectedPlacement, counts) };
+  }, [selectedPlacement, project, counts]);
 
   const onMove = (pieceId: string, sheetIndex: number, x: number, y: number, rotation: PieceRotation = 0) => {
     setLocked({ pieceId, sheetIndex, x, y, rotation });
@@ -214,7 +248,9 @@ export function CuttingView({ onOpenDrawing }: { onOpenDrawing?: (partId: PartId
         <button onClick={exportSvg} disabled={!report}>SVG</button>
         <button onClick={exportPng} disabled={!report}>PNG</button>
         <button onClick={exportPdf} disabled={!report}>PDF</button>
-        <button onClick={() => report && download('cutting.csv', reportToCsv(report, thicknessById), 'text/csv')} disabled={!report}>CSV</button>
+        <button onClick={() => report && download('cutting.csv', cuttingCsv(report), 'text/csv')} disabled={!report} title="Sheet, Part ID, Part Name, Width, Height, Rotation, X, Y, Material">cutting.csv</button>
+        <button onClick={() => report && download('remnants.csv', remnantsCsv(report), 'text/csv')} disabled={!report} title="Sheet, Remnant ID, Width, Height, Area, Material, Usable">remnants.csv</button>
+        <button onClick={() => report && download('cutting_summary.csv', reportToCsv(report, thicknessById), 'text/csv')} disabled={!report} title="Сводка по листам">Сводка CSV</button>
         <button onClick={() => report && download('cutting_parts.csv', cuttingPartsCsv(report, thicknessById), 'text/csv')} disabled={!report} title="cutting_parts.csv">Детали CSV</button>
         <button onClick={() => report && download('waste_report.csv', wasteReportCsv(report), 'text/csv')} disabled={!report} title="waste_report.csv">Отходы CSV</button>
         <button onClick={() => report && download('cutting.json', reportToJson(report), 'application/json')} disabled={!report}>JSON</button>
@@ -329,6 +365,18 @@ export function CuttingView({ onOpenDrawing }: { onOpenDrawing?: (partId: PartId
         {/* Статистика и список */}
         <aside style={{ width: 250, borderRight: '1px solid var(--border)', overflow: 'auto', padding: 10 }}>
           {!report && <div className="empty-hint">Нажмите «Пересчитать», чтобы получить оптимизированный раскрой.</div>}
+          {summary.length > 1 && (
+            <div style={{ marginBottom: 14 }}>
+              <h3 style={hdr}>Сводка</h3>
+              {summary.map((r) => (
+                <Row
+                  key={r.materialId}
+                  k={`${r.materialName}${r.thickness ? ` ${r.thickness} мм` : ''}`}
+                  v={`${r.sheetCount} л. · ${(r.utilization * 100).toFixed(0)}%`}
+                />
+              ))}
+            </div>
+          )}
           {jobs.map((job) => (
             <div key={job.materialId} style={{ marginBottom: 14 }}>
               <h3 style={hdr}>{job.statistics.materialName}</h3>
@@ -358,11 +406,32 @@ export function CuttingView({ onOpenDrawing }: { onOpenDrawing?: (partId: PartId
                   Сохранить полезные остатки ({usableRemnantCount})
                 </button>
               )}
+              {selectedInfo && selectedPlacement && (
+                <div style={{ border: '1px solid var(--accent)', borderRadius: 6, padding: 8, marginBottom: 10 }}>
+                  <strong style={{ fontSize: 12 }}>{selectedInfo.label}</strong>
+                  {selectedInfo.total > 1 && selectedInfo.instance && (
+                    <div className="dim" style={{ fontSize: 11 }}>
+                      Деталь {selectedPlacement.number}, экземпляр {selectedInfo.instance.instanceIndex} из {selectedInfo.total}
+                    </div>
+                  )}
+                  <Row k="Название" v={selectedPlacement.name} />
+                  <Row k="Размер" v={`${Math.round(selectedPlacement.length)}×${Math.round(selectedPlacement.width)}`} />
+                  <Row k="Материал" v={selectedInfo.material?.name ?? '—'} />
+                  <Row k="Поворот" v={selectedPlacement.rotation ? `ROT ${selectedPlacement.rotation}°` : 'нет'} />
+                  <Row k="Лист" v={String(selectedSheetIndex + 1)} />
+                  <Row k="Позиция" v={`X ${Math.round(selectedPlacement.x)} / Y ${Math.round(selectedPlacement.y)}`} />
+                  <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
+                    <button style={{ fontSize: 11 }} onClick={() => onOpenPart?.(selectedPlacement.partId)}>Деталь</button>
+                    <button style={{ fontSize: 11 }} onClick={() => onOpenIn3D?.(selectedPlacement.partId)}>В 3D</button>
+                    <button style={{ fontSize: 11 }} onClick={() => onOpenDrawing?.(selectedPlacement.partId)}>Чертёж</button>
+                  </div>
+                </div>
+              )}
               <h3 style={hdr}>Детали</h3>
               <ul className="parts-list">
                 {sheets.flatMap((s) => s.placements).map((p) => (
                   <li key={p.pieceId} className={p.pieceId === selectedPieceId ? 'selected' : ''} onClick={() => { selectPiece(p.pieceId); selectPart(p.partId); }}>
-                    <span>{p.number} {p.name}</span>
+                    <span>{placementLabel(p, counts)} {p.name}</span>
                     <span className="dim">{Math.round(p.length)}×{Math.round(p.width)}</span>
                   </li>
                 ))}

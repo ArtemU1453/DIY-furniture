@@ -3,9 +3,16 @@
  * CuttingResult (координаты из движка), а не отдельно нарисованная картинка.
  */
 import type { CuttingReport, CuttingResult, CuttingSheetResult } from '@/core/model/types';
+import { instanceCounts, placementLabel } from './instance';
 
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** Экранирование значения CSV (запятые, кавычки, переводы строк). */
+function csv(header: string[], rows: string[][]): string {
+  const q = (s: string) => (/[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
+  return [header, ...rows].map((r) => r.map(q).join(',')).join('\n');
+}
 
 /** SVG одного листа (координаты в мм; ось Y отражена — низ листа снизу). */
 export function sheetToSvg(sheet: CuttingSheetResult, materialName: string): string {
@@ -159,4 +166,129 @@ export function wasteReportCsv(report: CuttingReport): string {
   }
   const q = (s: string) => (/[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
   return [header, ...rows].map((r) => r.map(q).join(',')).join('\n');
+}
+
+/**
+ * cutting.csv (§64) — размещение деталей по листам в порядке колонок из
+ * задания: Sheet, Part ID, Part Name, Width, Height, Rotation, X, Y, Material.
+ *
+ * Part ID — метка ЭКЗЕМПЛЯРА (P001-2), если деталь размещена несколькими
+ * экземплярами (§78/§79): иначе строки одинаковой детали неразличимы.
+ */
+export function cuttingCsv(report: CuttingReport): string {
+  const header = ['Sheet', 'Part ID', 'Part Name', 'Width', 'Height', 'Rotation', 'X', 'Y', 'Material'];
+  const rows: string[][] = [];
+  for (const job of report.jobs) {
+    const counts = instanceCounts(job.sheets.flatMap((s) => s.placements));
+    for (const sheet of job.sheets) {
+      for (const p of sheet.placements) {
+        rows.push([
+          `${sheet.index + 1}${sheet.fromRemnant ? ' (remnant)' : ''}`,
+          placementLabel(p, counts),
+          p.name,
+          String(Math.round(p.length)),
+          String(Math.round(p.width)),
+          p.rotation ? `ROT ${p.rotation}°` : '0',
+          String(Math.round(p.x)),
+          String(Math.round(p.y)),
+          job.statistics.materialName,
+        ]);
+      }
+    }
+  }
+  return csv(header, rows);
+}
+
+/**
+ * remnants.csv (§65) — остатки листов.
+ * Колонки: Sheet, Remnant ID, Width, Height, Area, Material, Usable.
+ * Площадь в м²; Usable отражает критерии полезного остатка (§29).
+ */
+export function remnantsCsv(report: CuttingReport): string {
+  const header = ['Sheet', 'Remnant ID', 'Width', 'Height', 'Area', 'Material', 'Usable'];
+  const rows: string[][] = [];
+  for (const job of report.jobs) {
+    for (const sheet of job.sheets) {
+      for (const r of sheet.remnants) {
+        rows.push([
+          `${sheet.index + 1}${sheet.fromRemnant ? ' (remnant)' : ''}`,
+          r.id,
+          String(Math.round(r.width)),
+          String(Math.round(r.height)),
+          (r.area / 1_000_000).toFixed(3),
+          job.statistics.materialName,
+          r.usable ? 'yes' : 'no',
+        ]);
+      }
+    }
+  }
+  return csv(header, rows);
+}
+
+/** Строка сводки по одному материалу (§74/§76). */
+export interface CuttingSummaryRow {
+  materialId: string;
+  materialName: string;
+  thickness: number;
+  sheetFormat: string;
+  sheetCount: number;
+  partsAreaMm2: number;
+  sheetsAreaMm2: number;
+  remnantAreaMm2: number;
+  wasteAreaMm2: number;
+  utilization: number;
+  unplaced: number;
+}
+
+/**
+ * Сводка раскроя по материалам (§76). Отдельная строка на каждое задание —
+ * ЛДСП 16, МДФ 18 и ХДФ 3 считаются независимо и не смешиваются (§25/§26).
+ */
+export function cuttingSummary(
+  report: CuttingReport,
+  thicknessById?: Record<string, number>,
+  formatNameById?: Record<string, string>,
+): CuttingSummaryRow[] {
+  return report.jobs.map((job) => {
+    const st = job.statistics;
+    const formatId = job.sheets.find((s) => !s.fromRemnant)?.sheetMaterialId;
+    const sheet = job.settingsSnapshot?.sheet;
+    return {
+      materialId: String(job.materialId),
+      materialName: st.materialName,
+      thickness: thicknessById?.[String(job.materialId)] ?? 0,
+      sheetFormat: (formatId && formatNameById?.[formatId])
+        ?? (sheet ? `${Math.round(sheet.length)}×${Math.round(sheet.width)}` : ''),
+      sheetCount: st.sheetCount,
+      partsAreaMm2: st.piecesAreaMm2,
+      sheetsAreaMm2: st.sheetsUsableAreaMm2,
+      remnantAreaMm2: st.remnantAreaMm2,
+      wasteAreaMm2: st.wasteAreaMm2,
+      utilization: st.utilization,
+      unplaced: job.unplaced.length,
+    };
+  });
+}
+
+/** Сводка в CSV (§74). */
+export function cuttingSummaryCsv(
+  report: CuttingReport,
+  thicknessById?: Record<string, number>,
+  formatNameById?: Record<string, string>,
+): string {
+  const header = ['Material', 'Thickness', 'Sheet format', 'Sheets', 'Parts area', 'Sheets area', 'Remnant area', 'Waste area', 'Utilization', 'Unplaced'];
+  const a = (mm2: number) => (mm2 / 1_000_000).toFixed(3);
+  const rows = cuttingSummary(report, thicknessById, formatNameById).map((r) => [
+    r.materialName,
+    r.thickness ? String(r.thickness) : '',
+    r.sheetFormat,
+    String(r.sheetCount),
+    a(r.partsAreaMm2),
+    a(r.sheetsAreaMm2),
+    a(r.remnantAreaMm2),
+    a(r.wasteAreaMm2),
+    `${(r.utilization * 100).toFixed(1)}%`,
+    String(r.unplaced),
+  ]);
+  return csv(header, rows);
 }

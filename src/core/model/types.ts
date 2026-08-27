@@ -580,6 +580,18 @@ export interface CuttingStatistics {
   utilization: number;
 }
 
+/**
+ * Машиночитаемая причина, по которой деталь не размещена (§35).
+ *
+ * DETAIL_TOO_LARGE  — деталь не помещается ни в один доступный формат листа
+ *                     даже с учётом разрешённого поворота: раскроем не
+ *                     лечится, нужен другой лист или другая деталь.
+ * NO_VALID_PLACEMENT — деталь помещается в лист, но свободного места с учётом
+ *                     пропила, отступов и текстуры не нашлось.
+ * OUT_OF_STOCK      — место есть, но исчерпан ограниченный запас листов.
+ */
+export type UnplacedReason = 'DETAIL_TOO_LARGE' | 'NO_VALID_PLACEMENT' | 'OUT_OF_STOCK';
+
 /** Причина, по которой деталь не размещена. */
 export interface UnplacedPiece {
   pieceId: string;
@@ -588,7 +600,23 @@ export interface UnplacedPiece {
   number: string;
   length: Mm;
   width: Mm;
+  /** Код причины для программной обработки (§35). */
+  code: UnplacedReason;
+  /** Текст для пользователя. */
   reason: string;
+}
+
+/**
+ * Экземпляр детали в раскрое (§80). Деталь с quantity > 1 раскладывается
+ * несколькими экземплярами, но PartModel остаётся ОДИН (§5/§81): экземпляр
+ * только ссылается на него через partId.
+ */
+export interface CuttingInstance {
+  /** Стабильный id экземпляра: `<partId>#<instanceIndex>`. */
+  id: string;
+  partId: PartId;
+  /** Номер экземпляра, начиная с 1. */
+  instanceIndex: number;
 }
 
 /** Результат раскроя одного материала («оптимизированный вариант»). */
@@ -600,6 +628,65 @@ export interface CuttingResult {
   attemptsRun: number;
   /** Предупреждения (нехватка материала, ограничения и т.п.). */
   warnings: string[];
+  /** Задание, которым получен результат (§56). */
+  jobId?: string;
+  /** Идентификатор алгоритма (maxrects / guillotine). */
+  algorithm?: string;
+  /**
+   * Версия алгоритма (§57). После доработки движка старый результат остаётся
+   * читаемым и видно, каким поколением алгоритма он посчитан.
+   */
+  algorithmVersion?: string;
+  /**
+   * Снимок настроек, с которыми результат посчитан (§58/§59). Позволяет
+   * воспроизвести раскрой даже если настройки проекта уже изменились.
+   */
+  settingsSnapshot?: CuttingSettingsSnapshot;
+}
+
+/**
+ * Снимок параметров расчёта (§59). Хранится вместе с результатом, поэтому
+ * раскрой воспроизводим: те же детали + тот же снимок → тот же результат.
+ */
+export interface CuttingSettingsSnapshot {
+  algorithm: string;
+  algorithmVersion: string;
+  kerf: Mm;
+  trim: TrimSettings;
+  respectGrain: boolean;
+  attempts: number;
+  sortStrategy: string;
+  optimizationMode: OptimizationMode;
+  usableRemnant: UsableRemnantCriteria;
+  sheet: { length: Mm; width: Mm };
+  sheetMaterialId?: string;
+  /** Детерминированное зерно (§20): расчёт не использует случайность. */
+  seed: number;
+}
+
+/** Статус задания раскроя (§3). */
+export type CuttingJobStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'ERROR' | 'CANCELLED';
+
+/**
+ * Задание раскроя (§3). Одно задание = ОДИН материал одной толщины (§25/§26):
+ * смешивать ЛДСП 16 и ЛДСП 18 в одном задании нельзя, для них создаются
+ * отдельные задания (§75).
+ */
+export interface CuttingJob {
+  id: string;
+  projectId: string;
+  materialId: MaterialId;
+  /** Толщина — часть ключа задания: 16 и 18 мм не смешиваются (§26). */
+  thickness: Mm;
+  /** Выбранный формат листа (SheetMaterial.id) либо undefined = AUTO (§22). */
+  sheetFormatId?: string;
+  /** Экземпляры деталей задания (§4/§80), ссылаются на PartModel. */
+  instances: CuttingInstance[];
+  settings: CuttingSettingsSnapshot;
+  result?: CuttingResult;
+  status: CuttingJobStatus;
+  createdAt: string; // ISO
+  updatedAt: string; // ISO
 }
 
 /** Режим оптимизации раскроя. */
@@ -662,6 +749,8 @@ export interface SheetMaterial {
 }
 
 /** Сохранённый остаток (RemnantLibrary) — переиспользуемый в будущем раскрое. */
+export type RemnantStatus = 'AVAILABLE' | 'RESERVED' | 'USED' | 'ARCHIVED';
+
 export interface StoredRemnant {
   id: string;
   materialId: MaterialId;
@@ -672,6 +761,11 @@ export interface StoredRemnant {
   sourceSheetId: string;
   createdAt: string; // ISO
   note?: string;
+  /**
+   * Состояние остатка (§92). Отсутствие поля = AVAILABLE: остатки, сохранённые
+   * до этого этапа, продолжают работать как раньше.
+   */
+  status?: RemnantStatus;
 }
 
 /** Сохранённый результат раскроя + версия исходной модели (для инвалидации). */

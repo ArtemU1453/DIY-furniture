@@ -2,7 +2,15 @@ import { useState } from 'react';
 import { Modal } from '../ui/Modal';
 import { useEditorStore } from '@/app/store/editorStore';
 import type { MaterialId } from '@/core/model/ids';
-import type { GrainDirection } from '@/core/model/types';
+import type { GrainDirection, RemnantStatus } from '@/core/model/types';
+
+/** Состояния остатка (§92). В новый раскрой попадают только доступные. */
+const REMNANT_STATUSES: Array<[RemnantStatus, string]> = [
+  ['AVAILABLE', 'Доступен'],
+  ['RESERVED', 'Зарезервирован'],
+  ['USED', 'Израсходован'],
+  ['ARCHIVED', 'В архиве'],
+];
 
 /**
  * Библиотека остатков (RemnantLibrary). Сохранённые остатки можно добавить
@@ -13,6 +21,7 @@ export function RemnantLibraryDialog({ onClose }: { onClose: () => void }) {
   const project = useEditorStore((s) => s.project);
   const saveRemnant = useEditorStore((s) => s.saveRemnant);
   const removeRemnant = useEditorStore((s) => s.removeRemnant);
+  const setStatus = useEditorStore((s) => s.setRemnantStatus);
   const clearRemnants = useEditorStore((s) => s.clearRemnants);
   const saveUsable = useEditorStore((s) => s.saveUsableRemnantsFromResult);
 
@@ -48,7 +57,7 @@ export function RemnantLibraryDialog({ onClose }: { onClose: () => void }) {
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 12 }}>
         <thead>
           <tr style={{ textAlign: 'left', color: 'var(--dim,#9aa0a6)' }}>
-            <th>Материал</th><th>Ш×В</th><th>Толщ.</th><th>Дата</th><th></th>
+            <th>Материал</th><th>Ш×В</th><th>Толщ.</th><th>Состояние</th><th>Дата</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -57,11 +66,25 @@ export function RemnantLibraryDialog({ onClose }: { onClose: () => void }) {
               <td className="dim">{materialName(r.materialId)}</td>
               <td>{r.width}×{r.height}</td>
               <td>{r.thickness}</td>
+              <td>
+                {/* Состояние вместо удаления (§91/§92): архивный остаток не
+                    участвует в новом раскрое, но история его происхождения
+                    остаётся. */}
+                <select
+                  value={r.status ?? 'AVAILABLE'}
+                  style={{ width: 'auto', fontSize: 11 }}
+                  onChange={(e) => setStatus(r.id, e.target.value as RemnantStatus)}
+                >
+                  {REMNANT_STATUSES.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </td>
               <td className="dim">{r.createdAt.slice(0, 10)}</td>
               <td><button onClick={() => removeRemnant(r.id)} style={{ color: 'var(--danger)' }}>✕</button></td>
             </tr>
           ))}
-          {project.remnants.length === 0 && <tr><td colSpan={5} className="dim">Остатков нет.</td></tr>}
+          {project.remnants.length === 0 && <tr><td colSpan={6} className="dim">Остатков нет.</td></tr>}
         </tbody>
       </table>
 

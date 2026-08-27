@@ -3,10 +3,11 @@
  * материал → агрегированный отчёт (CuttingReport). Отчёт — производное от
  * производственной модели; его версия фиксируется для инвалидации.
  */
-import type { CuttingReport, Project } from '@/core/model/types';
+import type { CuttingReport, CuttingResult, Project } from '@/core/model/types';
 import { getCuttingEngine } from './CuttingEngine';
 import { buildCuttingInputs, productionSignature } from './buildInput';
 import { cuttingCacheKey, getCachedResult, setCachedResult } from './cache';
+import { jobId, snapshotOf } from './jobs';
 import type { CuttingRunControls } from './types';
 import type { MaterialId } from '@/core/model/ids';
 
@@ -21,12 +22,24 @@ export function runCutting(
 
   const inputs = buildCuttingInputs(project, options.materialFilter);
   const materialName = new Map(project.materials.map((m) => [m.id, m.name]));
+  const thicknessOf = new Map(project.materials.map((m) => [String(m.id), m.thickness]));
+
+  /* Результат помечается алгоритмом, его версией и снимком настроек (§56–§59):
+   * по сохранённому раскрою видно, чем и с какими параметрами он посчитан,
+   * поэтому его можно воспроизвести даже после смены настроек проекта. */
+  const stamp = (result: CuttingResult, input: typeof inputs[number]): CuttingResult => ({
+    ...result,
+    jobId: jobId(String(project.id), String(input.materialId), thicknessOf.get(String(input.materialId)) ?? 0),
+    algorithm: engine.id,
+    algorithmVersion: engine.version,
+    settingsSnapshot: snapshotOf(input, engine.id, engine.version),
+  });
 
   const jobs = inputs.map((input, i) => {
     // Кэш: одинаковый вход + алгоритм → прежний результат без пересчёта (§45).
     const cacheKey = cuttingCacheKey(input, engine.id);
     const cached = getCachedResult(cacheKey);
-    if (cached && !options.controls) return cached;
+    if (cached && !options.controls) return stamp(cached, input);
     const controls: CuttingRunControls = {
       onProgress: (p) =>
         options.controls?.onProgress?.({
@@ -38,7 +51,7 @@ export function runCutting(
     const result = engine.calculate(input, controls);
     result.statistics.materialName = materialName.get(input.materialId) ?? '';
     setCachedResult(cacheKey, result);
-    return result;
+    return stamp(result, input);
   });
 
   return {

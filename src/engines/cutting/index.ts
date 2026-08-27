@@ -6,7 +6,15 @@ export { runCutting, DEFAULT_ENGINE_ID } from './run';
 export { buildCuttingInputs, buildPieceInstances, productionSignature, isCuttingStale } from './buildInput';
 export { validateResult, validateSheet, type CuttingIssue } from './validator';
 export { m2 } from './metrics';
-export { sheetToSvg, resultToSvg, reportToCsv, reportToJson, cuttingPartsCsv, wasteReportCsv } from './export';
+export {
+  sheetToSvg, resultToSvg, reportToCsv, reportToJson, cuttingPartsCsv, wasteReportCsv,
+  cuttingCsv, remnantsCsv, cuttingSummary, cuttingSummaryCsv, type CuttingSummaryRow,
+} from './export';
+export {
+  instanceId, parseInstance, instanceLabel, instanceCounts, placementLabel, instancesOf,
+} from './instance';
+export { buildCuttingJobs, jobId, seedFor, snapshotOf, statusOf, validateJobConsistency } from './jobs';
+export { classifyUnplaced, unplacedMessage, toUnplaced } from './unplaced';
 export { GuillotineEngine } from './GuillotineEngine';
 export { compareAlgorithms, type AlgorithmComparisonRow } from './compare';
 export {
@@ -32,6 +40,12 @@ export {
   type RemnantSheet,
 } from './types';
 export type {
+  CuttingJob,
+  CuttingJobStatus,
+  CuttingInstance,
+  CuttingSettingsSnapshot,
+  UnplacedReason,
+  RemnantStatus,
   CuttingResult,
   CuttingSheetResult,
   CuttingRemnant,

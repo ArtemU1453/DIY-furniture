@@ -75,6 +75,7 @@ import type {
   ProjectSettings,
   SheetMaterial,
   StoredRemnant,
+  RemnantStatus,
 } from '@/core/model/types';
 import { newSheetMaterialId, newStoredRemnantId } from '@/core/model/ids';
 import { runCuttingInWorker, type CuttingHandle } from '@/workers/cuttingClient';
@@ -422,6 +423,8 @@ export interface EditorState {
   saveRemnant: (remnant: Omit<StoredRemnant, 'id' | 'createdAt'>) => string;
   saveUsableRemnantsFromResult: () => number;
   removeRemnant: (id: string) => void;
+  /** Сменить состояние остатка (§91/§92): AVAILABLE / RESERVED / USED / ARCHIVED. */
+  setRemnantStatus: (id: string, status: RemnantStatus) => void;
   clearRemnants: () => void;
 
   // ── Выбор ────────────────────────────────────────────────────────────────
@@ -1513,7 +1516,7 @@ export const useEditorStore = create<EditorState>()(
       // ── Библиотека остатков ──────────────────────────────────────────────
       saveRemnant: (remnant) => {
         const id = newStoredRemnantId();
-        commit((p) => void p.remnants.push({ ...remnant, id, createdAt: new Date().toISOString() }));
+        commit((p) => void p.remnants.push({ status: 'AVAILABLE', ...remnant, id, createdAt: new Date().toISOString() }));
         return id;
       },
       // Сохранить все «полезные» остатки текущего результата раскроя в библиотеку.
@@ -1537,6 +1540,7 @@ export const useEditorStore = create<EditorState>()(
                 grainDirection: grainByMat.get(r.materialId) ?? 'none',
                 sourceSheetId: r.sheetId,
                 createdAt: new Date().toISOString(),
+                status: 'AVAILABLE',
               });
             }
           }
@@ -1545,6 +1549,13 @@ export const useEditorStore = create<EditorState>()(
         return toAdd.length;
       },
       removeRemnant: (id) => commit((p) => void (p.remnants = p.remnants.filter((r) => r.id !== id))),
+      /* Архивация вместо удаления (§91): остаток исчезает из подбора, но
+       * история раскроя, из которого он получен, остаётся прослеживаемой. */
+      setRemnantStatus: (id, status) =>
+        commit((p) => {
+          const remnant = p.remnants.find((r) => r.id === id);
+          if (remnant) remnant.status = status;
+        }),
       clearRemnants: () => commit((p) => void (p.remnants = [])),
 
       selectPart: (id) =>

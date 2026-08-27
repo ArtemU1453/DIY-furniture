@@ -27,6 +27,7 @@ import { extractRemnants } from './remnants';
 import { computeCutLines } from './cutlines';
 import { computeSheetStats, computeStatistics } from './metrics';
 import { sheetFormats, formatForPiece, type SheetFormat } from './formats';
+import { toUnplaced } from './unplaced';
 
 interface Rect { x: number; y: number; w: number; h: number }
 
@@ -226,6 +227,7 @@ function attemptsForMode(input: CuttingInput): number {
 export class GuillotineEngine implements CuttingEngine {
   readonly id = 'guillotine';
   readonly name = 'Guillotine (прямолинейный раскрой)';
+  readonly version = '1.0';
 
   calculate(input: CuttingInput, controls?: CuttingRunControls): CuttingResult {
     const attempts = attemptsForMode(input);
@@ -286,13 +288,12 @@ export class GuillotineEngine implements CuttingEngine {
       };
     });
 
-    const unplaced: UnplacedPiece[] = chosen.unplaced.map((p) => ({
-      pieceId: p.pieceId, partId: p.partId, name: p.name, number: p.number,
-      length: p.length, width: p.width,
-      reason: chosen.stockExceeded
-        ? 'Недостаточно материала (исчерпан запас листов).'
-        : 'Не найдено допустимое свободное пространство с учётом ограничений (гильотинный рез).',
-    }));
+    // Причина кодируется, а не описывается строкой (§35): у «деталь больше
+    // листа», «нет места» и «кончился запас» разные решения.
+    const allFormats = sheetFormats(input);
+    const unplaced: UnplacedPiece[] = chosen.unplaced.map((p) =>
+      toUnplaced(p, allFormats, canRotate(p, input.options.respectGrain), chosen.stockExceeded),
+    );
 
     const warnings: string[] = [];
     if (chosen.stockExceeded) {
