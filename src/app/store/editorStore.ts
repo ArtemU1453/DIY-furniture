@@ -25,6 +25,21 @@ import {
   newPartId,
 } from '@/core/model/ids';
 import {
+  PARAMETRIC_KEY,
+  applyOverride as applyPartOverride,
+  describeDiff,
+  diffParametric,
+  findParametricTemplate,
+  generateParts,
+  readParametricModel,
+  resetOverride as resetPartOverrideFields,
+  runCommand as runParametricCommandPure,
+  type ParametricCommandType,
+  type ParametricDiff,
+  type ParametricModel,
+  type PartOverride,
+} from '@/engines/parametric';
+import {
   buildUpdatePatches,
   linkProfile,
   linkToProject,
@@ -112,6 +127,18 @@ export interface CreateConnectionResult {
 }
 
 const HISTORY_LIMIT = 100;
+
+/** Итог применения параметрической модели (§37/§67/§69). */
+export interface ParametricApplyResult {
+  ok: boolean;
+  /** Что изменилось — для истории и предупреждений. */
+  diff?: ParametricDiff;
+  added: number;
+  removed: number;
+  changed: number;
+  errors: string[];
+  description: string;
+}
 
 // ── Оформление документов ────────────────────────────────────────────────────
 // Настройки чертежа — это ОФОРМЛЕНИЕ, а не производственная модель: они не
@@ -225,6 +252,24 @@ export interface EditorState {
   // ── Параметрический шкаф ────────────────────────────────────────────────────
   createCabinet: (name?: string) => FurnitureId;
   updateCabinetParams: (id: FurnitureId, patch: Partial<CabinetParameters>) => void;
+
+  // ── Параметрический редактор (этап 18) ──────────────────────────────────────
+  /** Прочитать параметрическую модель изделия (или вывести из старых параметров). */
+  getParametricModel: (id: FurnitureId) => ParametricModel | null;
+  /** Записать модель и пересобрать детали. Возвращает отчёт генератора. */
+  applyParametricModel: (id: FurnitureId, model: ParametricModel) => ParametricApplyResult;
+  /** Выполнить команду параметрического редактора (§51). */
+  runParametricCommand: (
+    id: FurnitureId,
+    type: ParametricCommandType,
+    payload?: Record<string, unknown>,
+  ) => ParametricApplyResult;
+  /** Создать изделие из параметрического шаблона (§58–§60). */
+  createParametricFurniture: (templateId: string, name?: string) => FurnitureId | null;
+  /** Ручная правка параметрической детали (§43). */
+  setPartOverride: (partId: PartId, patch: PartOverride) => void;
+  /** «Вернуть расчётное значение» (§44). */
+  resetPartOverride: (partId: PartId, fields?: Array<keyof PartOverride>) => void;
 
   // ── Типовые конструкции (шаблоны) ──────────────────────────────────────────
   createFromTemplate: (templateId: string, values?: TemplateValues, name?: string) => { ok: boolean; id?: FurnitureId; errors?: TemplateIssue[] };
@@ -531,6 +576,106 @@ export const useEditorStore = create<EditorState>()(
           if (assembly) assembly.parts = built.parts;
           furniture.sections = built.sections;
           furniture.params = next as unknown as Record<string, unknown>;
+        }),
+
+
+      // ── Параметрический редактор ──────────────────────────────────────────
+      getParametricModel: (id) => {
+        const furniture = findFurniture(get().project, id);
+        return furniture ? readParametricModel(furniture) : null;
+      },
+
+      /* Единственный путь изменения геометрии (§50): модель → генератор →
+       * ProjectModel. Всё делается одной командой commit, поэтому пересчёт
+       * целиком ложится в undo/redo (§52). */
+      applyParametricModel: (id, model) => {
+        const project = get().project;
+        const furniture = findFurniture(project, id);
+        if (!furniture) {
+          return { ok: false, added: 0, removed: 0, changed: 0, errors: ['Изделие не найдено.'], description: '' };
+        }
+        const before = readParametricModel(furniture);
+        const existing = furniture.assemblies[0]?.parts ?? [];
+        const result = generateParts(model, existing);
+        if (!result.ok) {
+          return {
+            ok: false, added: 0, removed: 0, changed: 0,
+            errors: result.issues.filter((i) => i.severity === 'error').map((i) => i.message),
+            description: '',
+          };
+        }
+        const diff = diffParametric(before, model, existing);
+
+        commit((p) => {
+          const f = findFurniture(p, id);
+          if (!f) return;
+          const assembly = f.assemblies[0];
+          if (assembly) assembly.parts = result.parts;
+          // Модель хранится в изделии, поэтому переживает сохранение (§90).
+          f.params = { ...(f.params ?? {}), [PARAMETRIC_KEY]: model } as Record<string, unknown>;
+        });
+
+        return {
+          ok: true,
+          diff,
+          added: result.added.length,
+          removed: result.removed.length,
+          changed: result.changed.length,
+          errors: [],
+          description: describeDiff(diff),
+        };
+      },
+
+      runParametricCommand: (id, type, payload = {}) => {
+        const furniture = findFurniture(get().project, id);
+        if (!furniture) {
+          return { ok: false, added: 0, removed: 0, changed: 0, errors: ['Изделие не найдено.'], description: '' };
+        }
+        const model = readParametricModel(furniture);
+        const command = runParametricCommandPure(model, type, payload);
+        if (!command.ok) {
+          return {
+            ok: false, added: 0, removed: 0, changed: 0,
+            errors: command.message ? [command.message] : [], description: '',
+          };
+        }
+        const applied = get().applyParametricModel(id, command.model);
+        // Описание команды информативнее описания диффа.
+        return applied.ok ? { ...applied, description: command.description } : applied;
+      },
+
+      createParametricFurniture: (templateId, name) => {
+        const template = findParametricTemplate(templateId);
+        if (!template) return null;
+        const project = get().project;
+        const body = project.materials.find((m) => m.kind === 'ldsp') ?? project.materials[0];
+        const model: ParametricModel = { ...template.build(), materialId: body?.id ?? null };
+        if (body) model.thickness = body.thickness;
+
+        const furniture = createFurniture(name ?? template.name);
+        furniture.type = 'cabinet';
+        const result = generateParts(model, []);
+        commit((p) => {
+          furniture.params = { [PARAMETRIC_KEY]: model } as Record<string, unknown>;
+          if (furniture.assemblies[0]) furniture.assemblies[0].parts = result.parts;
+          p.furnitures.push(furniture);
+        });
+        return furniture.id;
+      },
+
+      setPartOverride: (partId, patch) =>
+        commit((p) => {
+          const part = findPart(p, partId);
+          if (!part) return;
+          Object.assign(part, applyPartOverride(part, patch));
+        }),
+
+      resetPartOverride: (partId, fields) =>
+        commit((p) => {
+          const part = findPart(p, partId);
+          if (!part) return;
+          const cleared = resetPartOverrideFields(part, fields);
+          part.metadata = cleared.metadata;
         }),
 
       createFromTemplate: (templateId, values, name) => {

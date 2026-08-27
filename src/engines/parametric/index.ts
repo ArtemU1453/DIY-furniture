@@ -1,0 +1,152 @@
+/** Публичный API параметрического редактора. */
+export {
+  createParametricModel,
+  DEFAULT_LIMITS,
+  DEFAULT_SHELVES,
+  DEFAULT_PARTITIONS,
+  DEFAULT_DOORS,
+  DEFAULT_DOOR_GAPS,
+  DEFAULT_BACK,
+  DEFAULT_LEGS,
+  DEFAULT_PLINTH,
+  DEFAULT_DRAWERS,
+  ROLE_TO_PART_ROLE,
+  type ParametricModel,
+  type Parameter,
+  type ParameterType,
+  type ParameterValue,
+  type PartDefinition,
+  type ParametricPartRole,
+  type ParametricRule,
+  type PartSource,
+  type CabinetConstructionType,
+  type ShelfSettings,
+  type ShelfDistribution,
+  type FixedShelf,
+  type PartitionSettings,
+  type PartitionOrientation,
+  type DoorSettings,
+  type DoorGapSettings,
+  type BackPanelSettings,
+  type BackPanelType,
+  type LegSettings,
+  type PlinthSettings,
+  type DrawerSettings,
+  type DimensionLimits,
+  type FurnitureKind,
+} from '@/core/parametric/types';
+
+export {
+  buildDependencyGraph,
+  dependents,
+  type ParameterDependencyGraph,
+  type DependencyNode,
+} from './dependencyGraph';
+
+export {
+  resolveParameters,
+  evaluateInModel,
+  builtinScope,
+  BUILTIN_NAMES,
+  type ResolveResult,
+  type ResolveIssue,
+} from './resolve';
+
+export {
+  validateParametricModel,
+  validateDimensions,
+  validateGeometry,
+  validateParameter,
+  isValidDimension,
+  MIN_PART_SIZE,
+  type ParametricIssue,
+  type ParametricValidation,
+} from './validator';
+
+export {
+  buildDefinitions,
+  computeGeometry,
+  shelfOffsets,
+  partitionPositions,
+  rulesForKind,
+  sideRule,
+  topBottomRule,
+  shelfRule,
+  partitionRule,
+  doorRule,
+  backPanelRule,
+  legRule,
+  plinthRule,
+  CABINET_PARAMETRIC_RULES,
+  SHELVING_RULES,
+  type CabinetGeometry,
+} from './rules';
+
+export {
+  generateParts,
+  applyOverride,
+  resetOverride,
+  partSource,
+  partOverrides,
+  hasOverride,
+  type GenerateResult,
+  type PartOverride,
+} from './generator';
+
+export {
+  diffParametric,
+  describeDiff,
+  previewRegeneration,
+  type ParametricDiff,
+  type ParameterChange,
+  type PartChange,
+} from './diff';
+
+export {
+  createModule,
+  duplicateModule,
+  flattenModules,
+  findModule,
+  replaceModule,
+  addChildModule,
+  removeModule,
+  alignItems,
+  snapValue,
+  cabinetSnapTargets,
+  type FurnitureModule,
+  type Alignment,
+  type AlignItem,
+  type SnapTarget,
+} from './modules';
+
+export {
+  runCommand,
+  setParameter,
+  addShelf,
+  removeShelf,
+  addPartition,
+  removePartition,
+  addDoor,
+  removeDoor,
+  setMaterial,
+  setConstruction,
+  setShelfDistribution,
+  setLegs,
+  setPlinth,
+  SETTABLE_FIELDS,
+  type ParametricCommandType,
+  type CommandResult,
+} from './commands';
+
+export {
+  PARAMETRIC_TEMPLATES,
+  PARAMETRIC_KEY,
+  cabinetTemplate,
+  shelvingTemplate,
+  baseCabinetTemplate,
+  findParametricTemplate,
+  readParametricModel,
+  hasParametricModel,
+  fromCabinetParameters,
+  type ParametricTemplate,
+} from './templates';
