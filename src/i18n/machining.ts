@@ -19,6 +19,9 @@ export const MACHINING_TYPE_LABELS: Record<MachiningType, string> = {
   confirmat: 'Конфирмат',
   countersink: 'Зенковка',
   cut: 'Рез',
+  groove: 'Паз',
+  cutout: 'Вырез',
+  mill: 'Фрезеровка',
   hinge: 'Петля',
   custom: 'Прочее',
 };

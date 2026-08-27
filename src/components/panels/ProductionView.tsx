@@ -12,7 +12,10 @@ import {
   meters,
   validateEdges,
 } from '@/engines/edges';
-import { allOperations } from '@/engines/machining';
+import {
+  allOperations, exportMachining, machineExporters, partStatus,
+  validateProjectMachining, toolLibrary, pickTool,
+} from '@/engines/machining';
 import { buildHardwareLedger } from '@/engines/bom/hardwareLedger';
 import { downloadText } from '@/features/documents/print';
 import type { EdgeBanding, EdgeSide, EdgeStatus } from '@/core/model/types';
@@ -33,6 +36,7 @@ export function ProductionView({ onOpenPart, onOpenCutting }: {
 } = {}) {
   const project = useEditorStore((s) => s.project);
   const selectPart = useEditorStore((s) => s.selectPart);
+  const regenerateMachining = useEditorStore((s) => s.regenerateMachining);
 
   const [search, setSearch] = useState('');
   const [materialFilter, setMaterialFilter] = useState('');
@@ -86,6 +90,31 @@ export function ProductionView({ onOpenPart, onOpenCutting }: {
   }, [banding, search, materialFilter, sideFilter, statusFilter, sort, project]);
 
   const totalMm = banding.reduce((n, b) => n + bandingTotalLength(b), 0);
+
+  const machiningReport = useMemo(() => validateProjectMachining(project, ops), [project, ops]);
+  /* Присадка по деталям (§75/§76): состояние выводится из тех же проверок,
+   * что и общий отчёт, поэтому строка детали и счётчик сверху согласованы. */
+  const machiningByPart = useMemo(() => {
+    const tools = toolLibrary(project);
+    const groups = new Map<string, { partId: string; label: string; count: number; tools: Set<string> }>();
+    for (const op of ops) {
+      const key = String(op.partId);
+      const part = findPart(project, op.partId);
+      const entry = groups.get(key) ?? {
+        partId: key,
+        label: part ? `${(part.metadata?.number as string) ?? ''} ${part.name}`.trim() : key,
+        count: 0,
+        tools: new Set<string>(),
+      };
+      entry.count += 1;
+      const tool = pickTool(tools, op);
+      if (tool) entry.tools.add(tool.name);
+      groups.set(key, entry);
+    }
+    return [...groups.values()]
+      .map((g) => ({ ...g, tools: [...g.tools], status: partStatus(project, g.partId) }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
+  }, [project, ops]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'auto' }}>
@@ -213,6 +242,58 @@ export function ProductionView({ onOpenPart, onOpenCutting }: {
         </table>
       </div>
 
+      {/* Присадка (§75/§76): состояние каждой детали и экспорт для станка. */}
+      <div style={{ padding: '0 10px 10px' }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+          <h3 style={{ ...hdr, margin: 0 }}>Присадка ({ops.length})</h3>
+          {machiningReport.errors > 0 && <span className="issue error" style={{ fontSize: 11, padding: '0 4px' }}>Ошибок: {machiningReport.errors}</span>}
+          {machiningReport.warnings > 0 && <span className="issue warning" style={{ fontSize: 11, padding: '0 4px' }}>Предупреждений: {machiningReport.warnings}</span>}
+          <span className="dim" style={{ fontSize: 11 }}>Годных операций: {machiningReport.validOperations} из {machiningReport.totalOperations}</span>
+          <span style={{ marginLeft: 'auto' }} />
+          <button
+            style={{ fontSize: 11 }}
+            onClick={() => {
+              const res = regenerateMachining();
+              // Ошибка не стирает прежнюю технологию (§80) — только сообщаем.
+              if (!res.ok) alert(`Пересчёт не выполнен:\n${res.errors.slice(0, 5).join('\n')}`);
+            }}
+          >Пересчитать присадку</button>
+          {machineExporters().map((exporter) => (
+            <button
+              key={exporter.id}
+              style={{ fontSize: 11 }}
+              onClick={() => downloadText(`machining.${exporter.extension}`, exportMachining(project, exporter.id), exporter.mimeType)}
+            >machining.{exporter.extension}</button>
+          ))}
+        </div>
+
+        <table style={table}>
+          <thead>
+            <tr style={thead}>
+              <th style={th}>Деталь</th><th style={thEnd}>Операций</th>
+              <th style={th}>Инструменты</th><th style={th}>Состояние</th>
+            </tr>
+          </thead>
+          <tbody>
+            {machiningByPart.map((row) => (
+              <tr
+                key={row.partId}
+                style={{ ...tr, cursor: 'pointer' }}
+                onClick={() => { selectPart(row.partId as PartId); onOpenPart?.(row.partId as PartId); }}
+              >
+                <td>{row.label}</td>
+                <td style={tdEnd}>{row.count}</td>
+                <td className="dim" style={{ fontSize: 11 }}>{row.tools.join(', ') || '—'}</td>
+                <td style={{ fontSize: 11, color: PART_STATUS_COLOR[row.status] }}>{row.status}</td>
+              </tr>
+            ))}
+            {machiningByPart.length === 0 && (
+              <tr><td colSpan={4} className="dim" style={{ padding: 8 }}>Присадки нет.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
       {/* Задания по лентам (§37/§71): по одному на материал+толщину. */}
       {jobs.length > 0 && (
         <div style={{ padding: '0 10px 16px' }}>
@@ -257,3 +338,11 @@ const thEnd: React.CSSProperties = { ...th, textAlign: 'right' };
 const tr: React.CSSProperties = { borderTop: '1px solid var(--border)' };
 const tdEnd: React.CSSProperties = { textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
 const sel: React.CSSProperties = { width: 'auto', fontSize: 11 };
+
+/** Цвет состояния детали (§76). */
+const PART_STATUS_COLOR: Record<string, string> = {
+  READY: 'var(--ok)',
+  WARNING: '#e6c060',
+  ERROR: 'var(--danger)',
+  OUTDATED: '#e6c060',
+};

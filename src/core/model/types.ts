@@ -254,6 +254,9 @@ export type MachiningType =
   | 'hinge' // присадка под петлю
   | 'countersink' // зенковка под потайную головку
   | 'cut' // рез/выборка по контуру
+  | 'groove' // паз (§26)
+  | 'cutout' // прямоугольный вырез (§28)
+  | 'mill' // фрезеровка по контуру (§29)
   | 'custom';
 
 /**
@@ -281,6 +284,95 @@ export const THROUGH = 'THROUGH' as const;
 
 /** Происхождение операции: авто из конструкции или ручная. */
 export type MachiningOrigin = 'generated' | 'manual';
+
+/** Тип инструмента (§4). */
+export type ToolType = 'DRILL' | 'END_MILL' | 'SAW' | 'CUSTOM';
+
+/**
+ * Откуда взялась операция (§8). Отличается от origin тем, что различает два
+ * вида автоматических операций: порождённую фурнитурой и параметрическим
+ * правилом. Поле необязательное — операции прошлых этапов остаются валидными.
+ */
+export type MachiningSource = 'HARDWARE_RULE' | 'PARAMETRIC_RULE' | 'MANUAL';
+
+/**
+ * Состояние операции (§9). DIRTY и OUTDATED различаются: DIRTY — параметры
+ * изменились и операцию надо пересчитать, OUTDATED — она посчитана по уже
+ * устаревшей модели.
+ */
+export type MachiningStatusKind = 'VALID' | 'WARNING' | 'ERROR' | 'DIRTY' | 'OUTDATED';
+
+/**
+ * Инструмент (§51). Библиотека локальная, лежит в проекте — отдельной базы
+ * не заводится.
+ */
+export interface ToolItem {
+  id: string;
+  name: string;
+  type: ToolType;
+  diameter: Mm;
+  /** Наибольшая достижимая глубина, мм. */
+  maxDepth: Mm;
+  archived?: boolean;
+}
+
+/**
+ * Способ задать координату операции (§15–§19).
+ *
+ * EDGE      — отступ от края детали;
+ * CENTER    — от центра (положительное значение вправо/вверх);
+ * POINT     — абсолютная координата в системе детали;
+ * OPERATION — от другой операции (например «шаг 32 мм от предыдущего»).
+ *
+ * Значение может быть числом или БЕЗОПАСНЫМ выражением вида `width / 2`
+ * (§20/§21): выражение разбирается парсером проекта, никакой eval.
+ */
+export type PositionReferenceKind = 'EDGE' | 'CENTER' | 'POINT' | 'OPERATION';
+
+export interface PositionReference {
+  kind: PositionReferenceKind;
+  /** Число или выражение (`width / 2`, `height - 37`). */
+  value: number | string;
+  /** Для EDGE — от какого края; для OPERATION — id операции-опоры. */
+  from?: string;
+}
+
+/**
+ * Шаблон операции в правиле (§14). Данные, а не код: правило описывается
+ * набором шаблонов, поэтому пользователь может задать свою технологию, не
+ * трогая исходники.
+ */
+export interface OperationTemplate {
+  id: string;
+  type: MachiningType;
+  toolType?: ToolType;
+  face: PartFace;
+  x: PositionReference;
+  y: PositionReference;
+  diameter?: number | string;
+  depth?: number | string;
+  /** Для паза/кармана/выреза. */
+  length?: number | string;
+  width?: number | string;
+  through?: boolean;
+}
+
+/**
+ * Результат генерации присадки детали (§83). Хранит снимок условий расчёта
+ * (§82), поэтому по старому результату видно, каким правилом и с каким
+ * профилем он получен.
+ */
+export interface MachiningResult {
+  partId: PartId;
+  operations: MachiningOperation[];
+  warnings: string[];
+  errors: string[];
+  /** Версия набора правил, которым посчитано (§84). */
+  version: string;
+  generatedAt: string; // ISO
+  /** Снимок производственного профиля (§82). */
+  profileSnapshot?: ManufacturingProfile;
+}
 
 /**
  * Технологическая операция присадки. Координаты x/y заданы в ЛОКАЛЬНОЙ системе
@@ -311,6 +403,17 @@ export interface MachiningOperation {
   datum?: DatumReference;
   /** true — параметры изменены вручную поверх правила (§41/§42). */
   override?: boolean;
+  /** Инструмент, которым выполняется операция (§2/§4). */
+  toolType?: ToolType;
+  /** Конкретный инструмент из библиотеки, если выбран (§51). */
+  toolId?: string;
+  /**
+   * Источник операции (§8). Необязательное поле: у операций прошлых этапов
+   * его нет, и оно выводится из origin.
+   */
+  source?: MachiningSource;
+  /** Состояние операции (§9). Выводится валидатором, в модели необязательно. */
+  status?: MachiningStatusKind;
   parameters?: Record<string, number | string | boolean>;
   metadata?: Record<string, unknown>;
 }
@@ -335,6 +438,16 @@ export interface ManufacturingProfile {
   minimumRemnant?: Mm;
   /** Технологический припуск на кромкование, мм (§39). */
   edgeCutAllowance?: Mm;
+  /**
+   * Возможности станка (§55). Живут в ЭТОМ профиле, а не в отдельной
+   * сущности (§56): производственные ограничения — свойство одного и того же
+   * производства.
+   */
+  supportedOperations?: MachiningType[];
+  maxToolDiameter?: Mm;
+  maxMachiningDepth?: Mm;
+  /** Библиотека инструментов производства (§52). */
+  tools?: ToolItem[];
   /**
    * Округление ЗАКУПОЧНОЙ длины кромки, мм (§34/§72). Расчётная длина от
    * округления не страдает: геометрия остаётся точной.
