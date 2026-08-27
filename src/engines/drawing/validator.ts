@@ -9,6 +9,8 @@
 import type { Project } from '@/core/model/types';
 import { allParts, findPart } from '@/core/model/selectors';
 import { allOperations } from '@/engines/machining';
+import { isCuttingStale } from '@/engines/cutting';
+import { isDocumentsOutdated } from './documents';
 import { contentArea } from './sheet';
 import type { DrawingDocument, DrawingPage } from './sheet';
 import type { DocumentModel } from './documents';
@@ -56,12 +58,40 @@ export function validateDrawing(doc: DrawingDocument): DrawingIssue[] {
   return issues;
 }
 
-/** Проверить связность с моделью: детали существуют, у отверстий есть координаты. */
+/**
+ * DocumentValidator (§57): все детали существуют, размеры валидны, нет
+ * потерянных Part ID и операций присадки, раскрой актуален, данные доступны.
+ */
 export function validateModelLinks(project: Project): DrawingIssue[] {
   const issues: DrawingIssue[] = [];
-  if (allParts(project).length === 0) {
+  const parts = allParts(project);
+  if (parts.length === 0) {
     issues.push({ severity: 'warning', code: 'drw.noParts', message: 'В проекте нет деталей — чертежи будут пустыми.' });
   }
+
+  // Размеры деталей валидны и материал доступен.
+  const materialIds = new Set(project.materials.map((m) => String(m.id)));
+  const edgeIds = new Set(project.edges.map((e) => String(e.id)));
+  for (const p of parts) {
+    const label = (p.metadata?.number as string) ?? p.name;
+    if (!(p.width > 0) || !(p.height > 0) || !(p.thickness > 0)) {
+      issues.push({ severity: 'error', code: 'drw.badSize', message: `Деталь ${label}: некорректные размеры (${p.width}×${p.height}×${p.thickness}).` });
+    }
+    if (!(p.quantity > 0)) {
+      issues.push({ severity: 'error', code: 'drw.badQuantity', message: `Деталь ${label}: количество должно быть больше 0.` });
+    }
+    if (p.material && !materialIds.has(String(p.material))) {
+      issues.push({ severity: 'error', code: 'drw.noMaterial', message: `Деталь ${label}: материал не найден в проекте.` });
+    }
+    for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+      const id = p.edges[side];
+      if (id && !edgeIds.has(String(id))) {
+        issues.push({ severity: 'error', code: 'drw.noEdge', message: `Деталь ${label}: кромка стороны «${side}» не найдена в проекте.` });
+      }
+    }
+  }
+
+  // Операции присадки: деталь существует, координаты заданы.
   for (const op of allOperations(project)) {
     if (!findPart(project, op.partId)) {
       issues.push({ severity: 'error', code: 'drw.opNoPart', message: `Операция присадки ссылается на несуществующую деталь.` });
@@ -70,7 +100,37 @@ export function validateModelLinks(project: Project): DrawingIssue[] {
       issues.push({ severity: 'error', code: 'drw.opNoCoords', message: `У операции присадки нет координат.` });
     }
   }
+
+  // Раскрой: устаревшую карту в производственный комплект пускать нельзя (§58).
+  if (project.cutting.report && isCuttingStale(project)) {
+    issues.push({
+      severity: 'error', code: 'drw.cuttingStale',
+      message: 'Раскрой требует перерасчёта — карта раскроя не соответствует модели.',
+    });
+  }
   return issues;
+}
+
+/**
+ * Предупреждения перед экспортом (§58): устаревшая документация и раскрой.
+ * Молча отдавать устаревший производственный документ нельзя.
+ */
+export interface ExportWarnings {
+  documentsOutdated: boolean;
+  cuttingStale: boolean;
+  cuttingMissing: boolean;
+  messages: string[];
+}
+
+export function exportWarnings(project: Project): ExportWarnings {
+  const documentsOutdated = isDocumentsOutdated(project);
+  const cuttingStale = project.cutting.report != null && isCuttingStale(project);
+  const cuttingMissing = project.cutting.report == null;
+  const messages: string[] = [];
+  if (documentsOutdated) messages.push('Документация требует обновления.');
+  if (cuttingStale) messages.push('Раскрой требует перерасчёта.');
+  if (cuttingMissing) messages.push('Раскрой не рассчитан — карта раскроя будет пустой.');
+  return { documentsOutdated, cuttingStale, cuttingMissing, messages };
 }
 
 /** Проверить весь комплект документов. */
@@ -80,7 +140,7 @@ export function validateDocumentModel(model: DocumentModel, project: Project): D
   return issues;
 }
 
-/** Обязательные документы в финальном комплекте (§45). */
+/** Обязательные документы в финальном комплекте (§29/§57). */
 const REQUIRED_TYPES = ['ASSEMBLY_DRAWING', 'PARTS_LIST', 'PART_DRAWING'] as const;
 
 export interface PdfPreflight {

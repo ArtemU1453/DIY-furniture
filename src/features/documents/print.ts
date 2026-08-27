@@ -18,6 +18,20 @@ function triggerDownload(name: string, content: string, mime: string): void {
 
 const sanitize = (s: string) => s.trim().replace(/[^\p{L}\p{N}_-]+/gu, '_') || 'document';
 
+/**
+ * Предпросмотр перед экспортом (§45): сколько страниц уйдёт в PDF.
+ * Возвращает готовую подпись вида «PDF — 18 страниц».
+ */
+export function pdfPageCountLabel(pageCount: number): string {
+  const n = Math.max(0, Math.trunc(pageCount));
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  let word = 'страниц';
+  if (mod10 === 1 && mod100 !== 11) word = 'страница';
+  else if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) word = 'страницы';
+  return `PDF — ${n} ${word}`;
+}
+
 /** Скачать одну страницу как SVG-файл. */
 export function downloadSvg(title: string, svg: string): void {
   triggerDownload(`${sanitize(title)}.svg`, svg, 'image/svg+xml');
@@ -49,6 +63,7 @@ export function downloadSvgPages(title: string, pages: string[]): void {
  * окно заблокировано браузером.
  */
 export function printPages(title: string, pages: string[]): boolean {
+  if (pages.length === 0) return false;
   const win = window.open('', '_blank', 'width=1100,height=850');
   if (!win) return false;
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
@@ -66,4 +81,22 @@ export function printPages(title: string, pages: string[]): boolean {
   win.document.write(html);
   win.document.close();
   return true;
+}
+
+/**
+ * Печать одной страницы документа (§44 — «текущий лист»).
+ * Возвращает false, если окно печати заблокировано браузером.
+ */
+export function printSinglePage(title: string, page: string): boolean {
+  return printPages(title, [page]);
+}
+
+/** Скачать одну страницу как SVG с предсказуемым именем файла. */
+export function downloadSvgNamed(fileName: string, svg: string): void {
+  triggerDownload(fileName, svg, 'image/svg+xml');
+}
+
+/** Скачать произвольный текстовый файл (CSV/JSON) с заданным именем. */
+export function downloadText(fileName: string, content: string, mime: string): void {
+  triggerDownload(fileName, content, mime);
 }

@@ -1,5 +1,5 @@
 /**
- * CUTTING_DRAWING — карта раскроя из СУЩЕСТВУЮЩЕГО CuttingResult (без повторного
+ * CUTTING_LAYOUT — карта раскроя из СУЩЕСТВУЮЩЕГО CuttingResult (без повторного
  * расчёта). На каждый лист: границы, детали с номерами и размерами, текстура,
  * технологические отступы, остатки.
  */
@@ -69,5 +69,5 @@ export function buildCuttingDocument(project: Project): DrawingDocument {
       title: { project: project.name, title: 'Карта раскроя', material: '—', scale: '1:1', date: new Date().toLocaleDateString('ru-RU'), sheet: 1, sheetsTotal: 1 },
     });
   }
-  return { id: `doc-cutting-${project.id}`, type: 'CUTTING_DRAWING', projectId: project.id, title: 'Карта раскроя', pages };
+  return { id: `doc-cutting-${project.id}`, type: 'CUTTING_LAYOUT', projectId: project.id, title: 'Карта раскроя', pages };
 }

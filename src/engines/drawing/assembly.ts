@@ -9,6 +9,8 @@ import { finalizeScene, type Prim } from './scene';
 import { hDim, renderDimension, vDim } from './dimensions';
 import { pickScale } from './layout';
 import { positionNumbers } from './positions';
+import { fmtMm } from './notation';
+import type { Balloon } from './drawingModel';
 import type { DrawingDocument, DrawingPage, Orientation, SheetFormat } from './sheet';
 
 const FORMAT: SheetFormat = 'A3';
@@ -33,9 +35,12 @@ export function buildAssemblyDocument(project: Project): DrawingDocument {
 
   const rect = (x: number, y: number, w: number, h: number) => prims.push({ kind: 'rect', x, y, w, h, stroke: '#33373d', sw: 0.4, fill: 'none' });
 
-  // Вид спереди (XY) + позиционные номера (балоны).
+  // Вид спереди (XY) + позиционные выноски (§21/§22).
   const positions = positionNumbers(project);
   const shownPositions = new Set<number>();
+  /* Балоны — позиционные номера, а не P-ID. Связь позиция → partId сохраняется
+   * в metadata документа, чтобы по клику на выноске можно было открыть деталь. */
+  const balloons: Balloon[] = [];
   parts.forEach((p, i) => {
     const b = boxes[i];
     rect(S(b.min.x - minX), S(b.min.y - minY), S(b.max.x - b.min.x), S(b.max.y - b.min.y));
@@ -47,6 +52,7 @@ export function buildAssemblyDocument(project: Project): DrawingDocument {
       const cy = S((b.min.y + b.max.y) / 2 - minY);
       prims.push({ kind: 'circle', cx, cy, r: 5, stroke: '#1a1b1e', sw: 0.4, fill: '#ffffff' });
       prims.push({ kind: 'text', x: cx, y: cy, text: String(pos), size: 3.4, bold: true, color: '#1a1b1e', anchor: 'middle', baseline: 'middle' });
+      balloons.push({ id: `balloon-${pos}`, position: pos, partId: p.id, x: cx, y: cy });
     }
   });
   // Вид сбоку (ZY) справа.
@@ -82,10 +88,23 @@ export function buildAssemblyDocument(project: Project): DrawingDocument {
       sheetsTotal: 1,
     },
   };
-  return { id: `doc-assembly-${project.id}`, type: 'ASSEMBLY_DRAWING', projectId: project.id, title: 'Сборочный чертёж', pages: [page] };
+  return {
+    id: `doc-assembly-${project.id}`,
+    type: 'ASSEMBLY_DRAWING',
+    projectId: project.id,
+    title: 'Сборочный чертёж',
+    pages: [page],
+    metadata: {
+      balloons,
+      // Связь позиция → partId (§21): позиция не заменяет P-ID, а ссылается на него.
+      positionToPart: Object.fromEntries(balloons.map((b) => [b.position, String(b.partId)])),
+      hardwareCount: project.hardware.length,
+      connectionCount: project.hardwareConnections.length,
+    },
+  };
 }
 
 function setVal(p: Prim, real: number): Prim {
-  if (p.kind === 'text' && /^\d+$/.test(p.text)) return { ...p, text: String(Math.round(real)) };
+  if (p.kind === 'text' && /^[\d.]+$/.test(p.text)) return { ...p, text: fmtMm(real) };
   return p;
 }

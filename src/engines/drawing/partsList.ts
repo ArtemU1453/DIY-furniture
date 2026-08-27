@@ -6,6 +6,7 @@
 import type { Part, Project } from '@/core/model/types';
 import { allParts } from '@/core/model/selectors';
 import { allOperations } from '@/engines/machining';
+import { edgeCode, fmtMm } from './notation';
 import { positionNumbers } from './positions';
 import { tablePages } from './specification';
 import type { TableColumn } from './table';
@@ -13,19 +14,12 @@ import type { DrawingDocument } from './sheet';
 
 const planeDims = (p: Part) => ({ length: Math.max(p.width, p.height), width: Math.min(p.width, p.height) });
 
-/** Компактное описание кромки: стороны с кромкой (Л/П/В/Н). */
+/**
+ * Кромка в едином формате проекта (§16): L1/L2/L3/L4 = низ/право/верх/лево,
+ * например «0.4/2/2/0.4». Тот же формат идёт и на чертёж детали, и в CSV.
+ */
 function edgeSummary(project: Project, part: Part): string {
-  const has = (id: string | null) => id != null;
-  const sides: string[] = [];
-  if (has(part.edges.left)) sides.push('Л');
-  if (has(part.edges.right)) sides.push('П');
-  if (has(part.edges.top)) sides.push('В');
-  if (has(part.edges.bottom)) sides.push('Н');
-  if (sides.length === 0) return '—';
-  // Толщина кромки берётся из первой найденной стороны.
-  const firstId = part.edges.left ?? part.edges.right ?? part.edges.top ?? part.edges.bottom;
-  const edge = project.edges.find((e) => e.id === firstId);
-  return `${sides.join(',')}${edge ? ` (${edge.thickness})` : ''}`;
+  return edgeCode(project, part);
 }
 
 export interface PartsListRow {
@@ -38,6 +32,8 @@ export interface PartsListRow {
   thickness: number;
   material: string;
   edge: string;
+  /** Примечание: не выдумывается, берётся из metadata.note или пустое (§24). */
+  note: string;
 }
 
 /** Сгруппированные строки спецификации деталей. */
@@ -73,6 +69,7 @@ export function partsListRows(project: Project): PartsListRow[] {
           thickness: p.thickness,
           material: p.material ? matName.get(p.material) ?? '—' : '—',
           edge: edgeSummary(project, p),
+          note: (p.metadata?.note as string) ?? '',
         },
       });
     }
@@ -91,12 +88,13 @@ export function buildPartsListDocument(project: Project): DrawingDocument {
     { title: 'Длина', width: 20, align: 'end' },
     { title: 'Ширина', width: 20, align: 'end' },
     { title: 'Толщ', width: 14, align: 'end' },
-    { title: 'Материал', width: 56 },
-    { title: 'Кромка', width: 26 },
+    { title: 'Материал', width: 50 },
+    { title: 'Кромка', width: 30 },
+    { title: 'Примечание', width: 34 },
   ];
   const rows = partsListRows(project).map((r) => [
     String(r.position), r.ids, r.name, String(r.quantity),
-    String(r.length), String(r.width), String(r.thickness), r.material, r.edge,
+    fmtMm(r.length), fmtMm(r.width), fmtMm(r.thickness), r.material, r.edge, r.note,
   ]);
   const pages = tablePages(project, 'PARTS_LIST', 'Спецификация деталей', cols, rows);
   return { id: `doc-partslist-${project.id}`, type: 'PARTS_LIST', projectId: project.id, title: 'Спецификация деталей', pages };

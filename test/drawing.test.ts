@@ -120,7 +120,8 @@ describe('DrawingEngine — чертежи и документация', () => {
   it('12: карта раскроя из существующего CuttingResult', async () => {
     await store().recalculateCutting();
     const doc = buildCuttingDocument(project());
-    expect(doc.type).toBe('CUTTING_DRAWING');
+    // Тип переименован на этапе 16 согласно требуемому перечню (§3).
+    expect(doc.type).toBe('CUTTING_LAYOUT');
     expect(doc.pages.length).toBeGreaterThan(0);
     expect(svgOf(doc)).toContain('<rect');
   });
@@ -153,7 +154,7 @@ describe('DrawingEngine — чертежи и документация', () => {
     const types = docs.map((d) => d.type);
     expect(types).toContain('ASSEMBLY_DRAWING');
     expect(types).toContain('PART_DRAWING');
-    expect(types).toContain('CUTTING_DRAWING');
+    expect(types).toContain('CUTTING_LAYOUT');
     expect(types).toContain('SPECIFICATION');
     expect(types).toContain('PRODUCTION_REPORT');
   });

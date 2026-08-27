@@ -568,6 +568,40 @@ export interface DocumentGenerationRecord {
 export interface DrawingSettings {
   scaleOverrides: Record<string, number | 'AUTO'>; // ключ документа → масштаб
   hidden: Record<string, boolean>; // ключ слоя → скрыт ли (напр. 'grain', 'edges')
+  /** Формат листа по документу (A4/A3/A2), §8. */
+  formatOverrides?: Record<string, 'A4' | 'A3' | 'A2'>;
+  /** Выбранные виды изделия для общего вида (§9). */
+  views?: string[];
+  /** Ручное оформление: смещения элементов, скрытые виды, примечания (§37). */
+  layout?: DocumentLayoutOverrides;
+  /** Версия оформления — входит в ключ кэша документов (§55). */
+  layoutVersion?: number;
+  /** Фильтр деталей для деталировки (§65). */
+  partFilter?: string;
+}
+
+/**
+ * Ручное оформление документа. Хранится ОТДЕЛЬНО от производственной модели:
+ * перемещение размера или добавление примечания не меняет ни одну деталь и не
+ * делает документацию OUTDATED (§37).
+ */
+export interface DocumentLayoutOverrides {
+  /** id элемента → смещение в мм относительно авторасчёта. */
+  moved: Record<string, { dx: number; dy: number }>;
+  /** id элемента → зафиксирован пользователем (§38). */
+  locked: Record<string, boolean>;
+  /** Скрытые виды: id вида → скрыт. */
+  hiddenViews: Record<string, boolean>;
+  /** Пользовательские примечания по документу. */
+  notes: Record<string, DocumentNote[]>;
+}
+
+/** Пользовательское примечание на чертеже (§36). */
+export interface DocumentNote {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
 }
 
 /** Состояние документации. version — сигнатура модели на момент генерации

@@ -9,17 +9,51 @@ export type Orientation = 'PORTRAIT' | 'LANDSCAPE';
 export type ScaleValue = number | 'AUTO';
 
 export type DocumentType =
+  | 'TITLE_PAGE'
+  | 'GENERAL_VIEW'
   | 'ASSEMBLY_DRAWING'
   | 'PART_DRAWING'
+  | 'CUTTING_LAYOUT'
+  | 'PARTS_LIST'
+  | 'HARDWARE_LIST'
+  | 'MACHINING_LIST'
+  | 'MATERIAL_LIST'
+  | 'PROJECT_SUMMARY'
+  /* Ниже — типы предыдущих этапов; сохранены, чтобы не ломать существующие
+   * документы и сохранённые проекты. */
   | 'CUTTING_DRAWING'
   | 'CUTTING_MAP'
   | 'MACHINING_DRAWING'
   | 'SPECIFICATION'
-  | 'PARTS_LIST'
-  | 'HARDWARE_LIST'
-  | 'PROJECT_SUMMARY'
   | 'PRODUCTION_REPORT';
 
+/** Основные виды изделия (§9). */
+export type ViewName = 'FRONT' | 'BACK' | 'LEFT' | 'RIGHT' | 'TOP' | 'BOTTOM' | 'ISOMETRIC';
+
+export const ALL_VIEWS: ViewName[] = ['FRONT', 'BACK', 'LEFT', 'RIGHT', 'TOP', 'BOTTOM', 'ISOMETRIC'];
+
+export const VIEW_LABELS: Record<ViewName, string> = {
+  FRONT: 'Спереди', BACK: 'Сзади', LEFT: 'Слева', RIGHT: 'Справа',
+  TOP: 'Сверху', BOTTOM: 'Снизу', ISOMETRIC: 'Изометрия',
+};
+
+/**
+ * Стандартный ряд масштабов, доступных пользователю (§10). 'FIT' — подобрать
+ * автоматически (эквивалент 'AUTO' в ScaleValue).
+ */
+export const STANDARD_SCALES: Array<{ value: ScaleValue; label: string }> = [
+  { value: 'AUTO', label: 'FIT (автоматически)' },
+  { value: 2, label: '2:1' },
+  { value: 1, label: '1:1' },
+  { value: 1 / 2, label: '1:2' },
+  { value: 1 / 5, label: '1:5' },
+  { value: 1 / 10, label: '1:10' },
+];
+
+/** Форматы листов, доступные пользователю (§8). */
+export const USER_FORMATS: SheetFormat[] = ['A4', 'A3', 'A2'];
+
+/** Основная надпись (§31): Проект, Деталь, Материал, Масштаб, Лист, Листов, Дата, Версия. */
 export interface TitleBlock {
   project: string;
   title: string;
@@ -29,6 +63,8 @@ export interface TitleBlock {
   date: string;
   sheet: number;
   sheetsTotal: number;
+  /** Ревизия комплекта документов: «Rev. 1» (§56). */
+  revision?: string;
 }
 
 export interface DrawingPage {
@@ -93,7 +129,8 @@ export function resolveScale(scale: ScaleValue, scene: Scene2D, area: { w: numbe
 }
 
 export function scaleLabel(factor: number): string {
-  if (factor >= 1) return '1:1';
+  if (factor > 1) return `${Math.round(factor)}:1`;
+  if (factor === 1) return '1:1';
   const denom = Math.round(1 / factor);
   return `1:${denom}`;
 }
@@ -117,5 +154,12 @@ export function titleBlockPrims(sheetW: number, sheetH: number, tb: TitleBlock):
   cell(x + TITLE_W / 2 + 3, y + 15, 'Масштаб', tb.scale);
   cell(x + 3, y + 28, 'Дата', tb.date);
   cell(x + TITLE_W / 2 + 3, y + 28, 'Лист', `${tb.sheet} / ${tb.sheetsTotal}`);
+  // Ревизия комплекта — в правом верхнем углу штампа (§31/§56).
+  if (tb.revision) {
+    out.push({
+      kind: 'text', x: x + TITLE_W - 3, y: y + 2, text: tb.revision,
+      size: 3, color: '#1a1b1e', anchor: 'end', baseline: 'hanging', bold: true,
+    });
+  }
   return out;
 }

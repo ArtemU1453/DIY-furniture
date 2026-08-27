@@ -31,6 +31,8 @@ import type {
   PartFace,
   MachiningOverride,
   ConnectionType,
+  DocumentLayoutOverrides,
+  DrawingSettings,
   Project,
   ProjectSettings,
   SheetMaterial,
@@ -93,6 +95,37 @@ export interface CreateConnectionResult {
 }
 
 const HISTORY_LIMIT = 100;
+
+// ── Оформление документов ────────────────────────────────────────────────────
+// Настройки чертежа — это ОФОРМЛЕНИЕ, а не производственная модель: они не
+// входят в documentsSignature, поэтому правка оформления никогда не делает
+// документацию OUTDATED (§37). На перерисовку влияет layoutVersion — она
+// входит в ключ кэша документов (§55).
+
+function emptyLayout(): DocumentLayoutOverrides {
+  return { moved: {}, locked: {}, hiddenViews: {}, notes: {} };
+}
+
+/** Гарантировать наличие блока настроек чертежа в проекте. */
+function ensureDrawingSettings(p: Project): DrawingSettings {
+  if (!p.documents.settings) {
+    p.documents.settings = { scaleOverrides: {}, hidden: {} };
+  }
+  return p.documents.settings;
+}
+
+/** Гарантировать наличие блока ручного оформления. */
+function ensureLayout(p: Project): DocumentLayoutOverrides {
+  const s = ensureDrawingSettings(p);
+  if (!s.layout) s.layout = emptyLayout();
+  return s.layout;
+}
+
+/** Увеличить версию оформления — инвалидирует кэш документов, но не модель. */
+function bumpLayoutVersion(p: Project): void {
+  const s = ensureDrawingSettings(p);
+  s.layoutVersion = (s.layoutVersion ?? 0) + 1;
+}
 
 /** Максимальный номер детали (Pxxx) в проекте — для назначения новых номеров. */
 function allPartNumbers(project: Project): number {
@@ -206,6 +239,24 @@ export interface EditorState {
   generateDocuments: () => { ok: boolean; errors: ProjectIssue[] };
   setDocumentScale: (docKey: string, scale: number | 'AUTO') => void;
   toggleDrawingLayer: (layer: string) => void;
+  /** Формат листа документа: A4 / A3 / A2 (§8). */
+  setDocumentFormat: (docKey: string, format: 'A4' | 'A3' | 'A2') => void;
+  /** Выбранные виды изделия для общего вида (§9). */
+  setDocumentViews: (views: string[]) => void;
+  /** Фильтр деталей в деталировке (§65). */
+  setDocumentPartFilter: (filter: string) => void;
+  /** Переместить элемент оформления — размер, текст (§37). */
+  moveDocumentElement: (elementId: string, dx: number, dy: number) => void;
+  /** Зафиксировать/освободить автоматически созданный элемент (§38). */
+  lockDocumentElement: (elementId: string, locked: boolean) => void;
+  /** Скрыть/показать вид на чертеже (§37). */
+  toggleDocumentView: (viewId: string) => void;
+  /** Добавить примечание на документ (§36). */
+  addDocumentNote: (docKey: string, note: { x: number; y: number; text: string }) => string;
+  /** Удалить примечание. */
+  removeDocumentNote: (docKey: string, noteId: string) => void;
+  /** «Сбросить оформление» — вернуть автоматический layout (§39). */
+  resetDocumentLayout: (docKey?: string) => void;
 
   // ── Материалы ───────────────────────────────────────────────────────────────
   addMaterial: (material: Material) => void;
@@ -709,14 +760,98 @@ export const useEditorStore = create<EditorState>()(
 
       setDocumentScale: (docKey, scale) =>
         commit((p) => {
-          if (!p.documents.settings) p.documents.settings = { scaleOverrides: {}, hidden: {} };
-          p.documents.settings.scaleOverrides[docKey] = scale;
+          ensureDrawingSettings(p).scaleOverrides[docKey] = scale;
         }),
 
       toggleDrawingLayer: (layer) =>
         commit((p) => {
-          if (!p.documents.settings) p.documents.settings = { scaleOverrides: {}, hidden: {} };
-          p.documents.settings.hidden[layer] = !p.documents.settings.hidden[layer];
+          const s = ensureDrawingSettings(p);
+          s.hidden[layer] = !s.hidden[layer];
+        }),
+
+      setDocumentFormat: (docKey, format) =>
+        commit((p) => {
+          const s = ensureDrawingSettings(p);
+          if (!s.formatOverrides) s.formatOverrides = {};
+          s.formatOverrides[docKey] = format;
+        }),
+
+      setDocumentViews: (views) =>
+        commit((p) => {
+          ensureDrawingSettings(p).views = [...views];
+        }),
+
+      setDocumentPartFilter: (filter) =>
+        commit((p) => {
+          ensureDrawingSettings(p).partFilter = filter;
+        }),
+
+      /* Перемещение элемента — это ОФОРМЛЕНИЕ. Модель деталей не трогаем, и
+       * документы от этого не становятся OUTDATED (§37): сигнатура модели
+       * настройки чертежа не учитывает. Растёт только layoutVersion — она
+       * входит в ключ кэша, чтобы страница перерисовалась (§55). */
+      moveDocumentElement: (elementId, dx, dy) =>
+        commit((p) => {
+          const layout = ensureLayout(p);
+          const prev = layout.moved[elementId] ?? { dx: 0, dy: 0 };
+          layout.moved[elementId] = { dx: prev.dx + dx, dy: prev.dy + dy };
+          layout.locked[elementId] = true; // ручная правка фиксирует элемент (§38)
+          bumpLayoutVersion(p);
+        }),
+
+      lockDocumentElement: (elementId, locked) =>
+        commit((p) => {
+          const layout = ensureLayout(p);
+          if (locked) layout.locked[elementId] = true;
+          else delete layout.locked[elementId];
+          bumpLayoutVersion(p);
+        }),
+
+      toggleDocumentView: (viewId) =>
+        commit((p) => {
+          const layout = ensureLayout(p);
+          if (layout.hiddenViews[viewId]) delete layout.hiddenViews[viewId];
+          else layout.hiddenViews[viewId] = true;
+          bumpLayoutVersion(p);
+        }),
+
+      addDocumentNote: (docKey, note) => {
+        const id = `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+        commit((p) => {
+          const layout = ensureLayout(p);
+          if (!layout.notes[docKey]) layout.notes[docKey] = [];
+          layout.notes[docKey].push({ id, ...note });
+          bumpLayoutVersion(p);
+        });
+        return id;
+      },
+
+      removeDocumentNote: (docKey, noteId) =>
+        commit((p) => {
+          const layout = ensureLayout(p);
+          if (!layout.notes[docKey]) return;
+          layout.notes[docKey] = layout.notes[docKey].filter((n) => n.id !== noteId);
+          bumpLayoutVersion(p);
+        }),
+
+      /* «Сбросить оформление» (§39): убираем ручные правки и возвращаемся к
+       * автоматическому расчёту. Без docKey сбрасывается всё оформление. */
+      resetDocumentLayout: (docKey) =>
+        commit((p) => {
+          const s = ensureDrawingSettings(p);
+          if (docKey) {
+            delete s.scaleOverrides[docKey];
+            if (s.formatOverrides) delete s.formatOverrides[docKey];
+            if (s.layout?.notes) delete s.layout.notes[docKey];
+          } else {
+            s.scaleOverrides = {};
+            s.formatOverrides = {};
+            s.hidden = {};
+            s.views = undefined;
+            s.partFilter = undefined;
+            s.layout = emptyLayout();
+          }
+          bumpLayoutVersion(p);
         }),
 
       removePart: (id) => {
