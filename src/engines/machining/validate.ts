@@ -132,12 +132,114 @@ export function validateCollisions(
   return issues;
 }
 
+/**
+ * Минимально допустимый остаток материала от края отверстия до края детали.
+ * Ниже этого значения кромка подрезается и деталь становится браком.
+ */
+export const MIN_MATERIAL_MARGIN = 2;
+
 /** Полная валидация набора операций проекта. */
+/**
+ * Минимальное расстояние от края детали до КРАЯ отверстия (§34/§53).
+ * Отверстие Ø20 с центром в 5 мм от края физически невозможно.
+ */
+export function validateEdgeDistance(
+  op: MachiningOperation,
+  part: Part,
+  constraints: MachiningConstraints,
+  profileMin?: number,
+): MachiningIssue[] {
+  if (op.diameter == null || op.diameter <= 0) return [];
+  const minEdge = profileMin ?? constraints.minEdgeOffset;
+  const fi = faceInfo(partFrame(part), op.face);
+  const r = op.diameter / 2;
+  const label = op.metadata?.number ?? op.id;
+
+  // По каждой оси грани: отверстие обязано остаться внутри детали.
+  const axes: Array<{ size: number; lo: number; hi: number }> = [
+    { size: fi.uSize, lo: op.x - r, hi: fi.uSize - (op.x + r) },
+    { size: fi.vSize, lo: op.y - r, hi: fi.vSize - (op.y + r) },
+  ];
+  for (const a of axes) {
+    if (a.lo < 0 || a.hi < 0) {
+      return [{
+        severity: 'error',
+        code: 'machining.holeOutOfPart',
+        message: `Операция ${label}: отверстие Ø${op.diameter} выходит за пределы детали.`,
+        operationId: op.id,
+      }];
+    }
+  }
+
+  /*
+   * Отступ от края проверяем только там, где он В ПРИНЦИПЕ достижим и где
+   * положение отверстия свободно.
+   *
+   * 1. Присадка в торец панели (размер грани = толщина детали) физически не
+   *    может дать minEdge с обеих сторон — центрирование там уже оптимально.
+   * 2. Положение сгенерированных операций диктует стандарт крепежа, а не
+   *    пожелание пользователя: чашка петли Ø35 ставится на 22.5 мм от края
+   *    (5 мм до края — это норма), сквозное под конфирмат встаёт на середину
+   *    толщины ответной панели (16/2 = 8 мм). Занижать такие значения нельзя
+   *    физически, поэтому для них проверяем только реальный подрез материала
+   *    (MIN_MATERIAL_MARGIN), а недобор до профильного minEdge показываем
+   *    предупреждением.
+   */
+  const free = op.origin === 'manual';
+  const hardMin = free ? minEdge : MIN_MATERIAL_MARGIN;
+  for (const a of axes) {
+    if (a.size < op.diameter + 2 * hardMin) continue; // отступ недостижим — не ошибка
+    const worst = Math.min(a.lo, a.hi);
+    if (worst < hardMin) {
+      return [{
+        severity: 'error',
+        code: 'machining.edgeDistance',
+        message: `Операция ${label}: край отверстия ближе ${hardMin} мм к краю детали (${worst.toFixed(1)} мм).`,
+        operationId: op.id,
+      }];
+    }
+    if (!free && worst < minEdge && a.size >= op.diameter + 2 * minEdge) {
+      return [{
+        severity: 'warning',
+        code: 'machining.edgeDistanceRule',
+        message: `Операция ${label}: отступ от края ${worst.toFixed(1)} мм меньше профильного (${minEdge} мм) — задано правилом крепежа.`,
+        operationId: op.id,
+      }];
+    }
+  }
+  return [];
+}
+
+/** Ссылочная целостность операции: связь и фурнитура должны существовать (§32). */
+export function validateReferences(op: MachiningOperation, project: Project): MachiningIssue[] {
+  const issues: MachiningIssue[] = [];
+  const label = op.metadata?.number ?? op.id;
+  if (op.sourceHardwareConnectionId
+    && !project.hardwareConnections.some((c) => c.id === op.sourceHardwareConnectionId)) {
+    issues.push({
+      severity: 'error',
+      code: 'machining.noConnection',
+      message: `Операция ${label}: соединение не найдено.`,
+      operationId: op.id,
+    });
+  }
+  if (op.hardwareId && !project.hardware.some((h) => h.id === op.hardwareId)) {
+    issues.push({
+      severity: 'error',
+      code: 'machining.noHardware',
+      message: `Операция ${label}: фурнитура не найдена.`,
+      operationId: op.id,
+    });
+  }
+  return issues;
+}
+
 export function validateMachining(
   ops: MachiningOperation[],
   project: Project,
 ): MachiningIssue[] {
   const constraints = project.machining.constraints;
+  const profileMin = project.machining.profile?.minHoleEdgeDistance;
   const issues: MachiningIssue[] = [];
   for (const op of ops) {
     const part = findPart(project, op.partId);
@@ -150,8 +252,18 @@ export function validateMachining(
       });
       continue;
     }
+    if (op.diameter != null && op.diameter <= 0) {
+      issues.push({
+        severity: 'error',
+        code: 'machining.badDiameter',
+        message: `Операция ${op.metadata?.number ?? op.id}: диаметр должен быть больше 0.`,
+        operationId: op.id,
+      });
+    }
     issues.push(...validateDrillingDepth(op, part, constraints));
     issues.push(...validateBounds(op, part, constraints));
+    issues.push(...validateEdgeDistance(op, part, constraints, profileMin));
+    issues.push(...validateReferences(op, project));
   }
   issues.push(...validateCollisions(ops, constraints));
   return issues;

@@ -98,6 +98,18 @@ export type MachiningType =
 /** Грань детали, с которой заходит инструмент. */
 export type PartFace = 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right';
 
+/**
+ * Технологическая база для простановки размеров на чертеже (§52).
+ * A — левый/нижний край детали, B — противоположный, C — вспомогательная.
+ */
+export type DatumReference = 'A' | 'B' | 'C';
+
+/**
+ * Признак сквозного отверстия. Глубина сквозного НЕ задаётся числом-заглушкой:
+ * используется through: true, а фактическая глубина равна толщине детали.
+ */
+export const THROUGH = 'THROUGH' as const;
+
 /** Происхождение операции: авто из конструкции или ручная. */
 export type MachiningOrigin = 'generated' | 'manual';
 
@@ -124,8 +136,32 @@ export interface MachiningOperation {
   origin: MachiningOrigin;
   sequence?: number;
   sourceHardwareConnectionId?: HardwareConnectionId;
+  /** Фурнитура, к которой относится отверстие (§31/§60). */
+  hardwareId?: HardwareId;
+  /** База для простановки размеров на чертеже (§52). */
+  datum?: DatumReference;
+  /** true — параметры изменены вручную поверх правила (§41/§42). */
+  override?: boolean;
   parameters?: Record<string, number | string | boolean>;
   metadata?: Record<string, unknown>;
+}
+
+/** Ручная правка параметров автоматически созданной операции (§42). */
+export type MachiningOverride = Partial<
+  Pick<MachiningOperation, 'diameter' | 'depth' | 'x' | 'y' | 'face' | 'through' | 'type'>
+>;
+
+/**
+ * Производственный профиль (§54) — технологические умолчания цеха.
+ * Расширяется дополнительными профилями без переписывания системы.
+ */
+export interface ManufacturingProfile {
+  id: string;
+  name: string;
+  sawKerf: Mm;
+  minHoleEdgeDistance: Mm;
+  defaultDrillDepth: Mm;
+  defaultJointType: ConnectionType;
 }
 
 /** Технологические ограничения присадки (не зашиваются в UI). */
@@ -140,6 +176,13 @@ export interface MachiningConstraints {
 /** Состояние присадки на уровне проекта. Ручные операции хранятся в деталях. */
 export interface MachiningState {
   constraints: MachiningConstraints;
+  /**
+   * Ручные правки автоматических операций по id операции (§42). Переживают
+   * пересчёт; «Сбросить правило» удаляет запись.
+   */
+  overrides?: Record<string, MachiningOverride>;
+  /** Производственный профиль цеха (§54). */
+  profile?: ManufacturingProfile;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,6 +218,18 @@ export interface Hardware {
   metadata?: Record<string, unknown>;
 }
 
+/**
+ * Тип соединения (способ крепления). Отделён от категории фурнитуры:
+ * категория описывает ЧЕМ крепим, ConnectionType — КАК. Расширяется значениями.
+ */
+export type ConnectionType =
+  | 'CONFIRMAT'
+  | 'DOWEL'
+  | 'MINIFIX'
+  | 'SCREW'
+  | 'CAM_LOCK'
+  | 'OTHER';
+
 /** Тип конструктивного узла (Joint). */
 export type JointType =
   | 'BUTT'
@@ -194,6 +249,8 @@ export interface HardwareConnection {
   hardwareId: HardwareId;
   partAId: PartId;
   partBId: PartId;
+  /** Способ соединения (CONFIRMAT/DOWEL/…). Выводится из категории крепежа. */
+  connectionType?: ConnectionType;
   jointType?: JointType;
   quantity?: number; // число крепежа в узле (переопределяет parameters.count)
   parameters?: Record<string, number | string | boolean>;

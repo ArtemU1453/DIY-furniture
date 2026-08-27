@@ -112,4 +112,48 @@ export function worldToFaceXY(part: Part, face: PartFace, world: V3): { x: numbe
   return { x: dot(rel, fi.u), y: dot(rel, fi.v) };
 }
 
+/**
+ * machiningToWorld — ЛОКАЛЬНЫЕ координаты операции → МИРОВЫЕ (§16).
+ *
+ * Локальные координаты (x, y на грани детали) — источник истины: они не
+ * меняются при перемещении/повороте детали. Мировое положение всегда
+ * выводится отсюда, поэтому 3D и чертежи остаются согласованными.
+ */
+export function machiningToWorld(
+  part: Part,
+  op: { face: PartFace; x: number; y: number; depth?: number },
+): { position: Vec3; inward: Vec3; normal: Vec3; tip: Vec3 } {
+  const w = operationWorld(part, op.face, op.x, op.y);
+  const depth = typeof op.depth === 'number' && Number.isFinite(op.depth) ? op.depth : 0;
+  return { ...w, tip: add(w.position, scale(w.inward, depth)) };
+}
+
+/**
+ * worldToMachining — МИРОВАЯ точка → локальные координаты операции (§17).
+ *
+ * Грань определяется автоматически: выбирается та, к плоскости которой точка
+ * ближе всего. Обратное преобразование к machiningToWorld.
+ */
+export function worldToMachining(
+  part: Part,
+  world: V3,
+): { face: PartFace; x: number; y: number } {
+  const frame = partFrame(part);
+  let best: { face: PartFace; x: number; y: number; dist: number } | null = null;
+  for (const face of ALL_FACES) {
+    const fi = faceInfo(frame, face);
+    const rel = sub(world, fi.corner);
+    const x = dot(rel, fi.u);
+    const y = dot(rel, fi.v);
+    // Расстояние до плоскости грани вдоль нормали.
+    const dist = Math.abs(dot(rel, fi.normal));
+    // Штраф за выход за пределы грани — предпочитаем грань, куда точка попадает.
+    const outside =
+      Math.max(0, -x) + Math.max(0, x - fi.uSize) + Math.max(0, -y) + Math.max(0, y - fi.vSize);
+    const score = dist + outside * 2;
+    if (!best || score < best.dist) best = { face, x, y, dist: score };
+  }
+  return { face: best!.face, x: best!.x, y: best!.y };
+}
+
 export const vec = { add, sub, scale, dot, neg };

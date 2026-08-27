@@ -158,23 +158,47 @@ function faceHoles(
 }
 
 // ── Минификс / эксцентрик ─────────────────────────────────────────────────────
+/**
+ * Общий механизм эксцентриковой стяжки: корпус (эксцентрик) в пласть проходной
+ * детали + шток в торец принимающей. MINIFIX и CAM_LOCK технологически
+ * совпадают, поэтому используют ОДНУ реализацию с разными умолчаниями (§10).
+ */
+function buildCamConnection(
+  { connection, hardware, partA, partB }: RuleInput,
+  defaults: { camDiameter: number; camDepth: number; rodDiameter: number; rodDepth: number },
+): MachiningOperation[] {
+  const p = hardware.parameters ?? {};
+  const count = resolveCount(connection, hardware, 2);
+  const edgeOffset = num(connection.parameters?.edgeOffset, num(p.edgeOffset, 32));
+  const joint = analyzeJoint(partA, partB, { count, edgeOffset });
+  if (!joint) return [];
+  const camD = num(p.camDiameter, defaults.camDiameter);
+  const camDepth = Math.min(num(p.camDepth, defaults.camDepth), joint.through.thickness - 1);
+  const rodD = num(p.rodDiameter, defaults.rodDiameter);
+  const rodDepth = num(p.rodDepth, defaults.rodDepth);
+  return [
+    ...planHoles(joint.through, connection.id, 'cam', 'boring', camD, camDepth, false),
+    ...planHoles(joint.receiving, connection.id, 'rod', 'dowel', rodD, rodDepth, false),
+  ];
+}
+
 export const minifixRule: MachiningRule = {
   category: 'minifix',
-  build({ connection, hardware, partA, partB }) {
-    const p = hardware.parameters ?? {};
-    const count = resolveCount(connection, hardware, 2);
-    const edgeOffset = num(connection.parameters?.edgeOffset, num(p.edgeOffset, 32));
-    const joint = analyzeJoint(partA, partB, { count, edgeOffset });
-    if (!joint) return [];
-    const camD = num(p.camDiameter, 15);
-    const camDepth = Math.min(num(p.camDepth, joint.through.thickness / 2 + 1), joint.through.thickness - 1);
-    const rodD = num(p.rodDiameter, 8);
-    const rodDepth = num(p.rodDepth, 34);
-    // Корпус эксцентрика (глухая присадка) в пласть проходной детали + шток в торец.
-    return [
-      ...planHoles(joint.through, connection.id, 'cam', 'boring', camD, camDepth, false),
-      ...planHoles(joint.receiving, connection.id, 'rod', 'dowel', rodD, rodDepth, false),
-    ];
+  build(input) {
+    const t = input.partA.thickness;
+    return buildCamConnection(input, { camDiameter: 15, camDepth: t / 2 + 1, rodDiameter: 8, rodDepth: 34 });
+  },
+};
+
+/**
+ * CAM_LOCK — эксцентриковая стяжка (межсекционная). Технология та же, что у
+ * минификса; отличаются только типовые размеры корпуса и штока.
+ */
+export const camLockRule: MachiningRule = {
+  category: 'connector',
+  build(input) {
+    const t = input.partA.thickness;
+    return buildCamConnection(input, { camDiameter: 20, camDepth: t / 2 + 2, rodDiameter: 10, rodDepth: 40 });
   },
 };
 
@@ -303,6 +327,7 @@ export function getMachiningRule(category: HardwareCategory): MachiningRule | un
 registerMachiningRule(dowelRule);
 registerMachiningRule(confirmatRule);
 registerMachiningRule(minifixRule);
+registerMachiningRule(camLockRule);
 registerMachiningRule(screwRule);
 registerMachiningRule(cornerRule);
 registerMachiningRule(hingeRule);

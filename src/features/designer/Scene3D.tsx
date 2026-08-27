@@ -80,13 +80,20 @@ function MachiningLayer({
   project,
   selectedId,
   onSelect,
+  onlyPartId,
+  highlightConnectionId,
 }: {
   project: Project;
   selectedId: MachiningId | null;
   onSelect: (id: MachiningId) => void;
+  /** Показывать присадку только выбранной детали (§38). */
+  onlyPartId?: string | null;
+  /** Подсветить операции выбранного соединения (§40). */
+  highlightConnectionId?: string | null;
 }) {
   const markers = useMemo(() => {
     return allOperations(project)
+      .filter((op) => !onlyPartId || String(op.partId) === String(onlyPartId))
       .map((op) => {
         const part = findPart(project, op.partId);
         if (!part) return null;
@@ -94,18 +101,20 @@ function MachiningLayer({
         return {
           id: op.id,
           origin: op.origin,
+          connId: op.sourceHardwareConnectionId ? String(op.sourceHardwareConnectionId) : null,
           r: Math.max((op.diameter ?? 6) / 2, 3) * MM_TO_UNIT,
           pos: [w.position.x * MM_TO_UNIT, w.position.y * MM_TO_UNIT, w.position.z * MM_TO_UNIT] as [number, number, number],
         };
       })
       .filter((m): m is NonNullable<typeof m> => m !== null);
-  }, [project]);
+  }, [project, onlyPartId]);
 
   return (
     <group>
       {markers.map((m) => {
         const sel = m.id === selectedId;
-        const color = sel ? '#ffcf4c' : m.origin === 'manual' ? '#e0803c' : '#e5534b';
+        const inConn = highlightConnectionId != null && m.connId === highlightConnectionId;
+        const color = sel ? '#ffcf4c' : inConn ? '#7ad1a0' : m.origin === 'manual' ? '#e0803c' : '#e5534b';
         return (
           <mesh
             key={m.id}
@@ -115,7 +124,7 @@ function MachiningLayer({
               onSelect(m.id);
             }}
           >
-            <sphereGeometry args={[sel ? m.r * 1.6 : m.r, 12, 12]} />
+            <sphereGeometry args={[sel || inConn ? m.r * 1.6 : m.r, 12, 12]} />
             <meshBasicMaterial color={color} />
           </mesh>
         );
@@ -293,7 +302,8 @@ export function Scene3D({
   const updatePart = useEditorStore((s) => s.updatePart);
   const focusNonce = useEditorStore((s) => s.focusNonce);
   const viewer = useEditorStore((s) => s.viewer);
-  const showMachining = viewer.showMachining;
+  const machiningMode = viewer.machiningMode;
+  const showMachining = machiningMode !== 'off' || viewer.showMachining;
   const showHardware = viewer.showHardware;
 
   const localApiRef = useRef<CameraApi | null>(null);
@@ -399,7 +409,13 @@ export function Scene3D({
           <HardwareLayer project={project} selectedId={selectedConnectionId} />
         )}
         {construction && showMachining && (
-          <MachiningLayer project={project} selectedId={selectedOperationId} onSelect={selectOperation} />
+          <MachiningLayer
+            project={project}
+            selectedId={selectedOperationId}
+            onSelect={selectOperation}
+            onlyPartId={machiningMode === 'selected' ? selectedPartId : null}
+            highlightConnectionId={selectedConnectionId}
+          />
         )}
 
         <OrbitControls makeDefault enablePan enableZoom enableRotate />

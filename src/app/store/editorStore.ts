@@ -29,6 +29,8 @@ import type {
   Material,
   Part,
   PartFace,
+  MachiningOverride,
+  ConnectionType,
   Project,
   ProjectSettings,
   SheetMaterial,
@@ -40,7 +42,7 @@ import type { CuttingProgress } from '@/engines/cutting';
 import { documentsSignature, nextDocVersion } from '@/engines/drawing';
 import { runProductionCheck } from '@/engines/status';
 import type { ProjectIssue } from '@/engines/status';
-import { inferJointType } from '@/engines/machining';
+import { inferJointType, categoryOfConnectionType } from '@/engines/machining';
 import { hardwareFromTemplate, type HardwareTemplate, catalogByCategory } from '@/core/model/hardwareCatalog';
 import {
   instantiateTemplate,
@@ -111,8 +113,12 @@ export type DisplayMode = 'solid' | 'wireframe' | 'edges' | 'transparent';
 /** UI-состояние 3D-редактора. Не сохраняется в производственную модель. */
 export type ViewerTool = 'select' | 'move';
 
+/** Режим показа присадки в 3D (§38). */
+export type MachiningMode = 'off' | 'all' | 'selected';
+
 export interface ViewerUiState {
   tool: ViewerTool;
+  machiningMode: MachiningMode;
   displayMode: DisplayMode;
   showGrid: boolean;
   showAxes: boolean;
@@ -125,6 +131,7 @@ export interface ViewerUiState {
 
 export const DEFAULT_VIEWER: ViewerUiState = {
   tool: 'select',
+  machiningMode: 'off',
   displayMode: 'solid',
   showGrid: true,
   showAxes: false,
@@ -240,6 +247,12 @@ export interface EditorState {
     through?: boolean;
   }) => MachiningId;
   removeOperation: (id: MachiningId) => void;
+  /** Ручная правка автоматической операции (MANUAL OVERRIDE, §41/§42). */
+  setOperationOverride: (id: MachiningId, patch: MachiningOverride) => void;
+  /** «Сбросить правило» — удалить ручную правку, операция снова из правила (§43). */
+  resetOperationToRule: (id: MachiningId) => void;
+  /** Сменить способ соединения (CONFIRMAT/DOWEL/…) — подбирает крепёж (§65/§66). */
+  setConnectionType: (id: HardwareConnectionId, type: ConnectionType) => void;
   selectOperation: (id: MachiningId | null) => void;
 
   // ── Раскрой ──────────────────────────────────────────────────────────────
@@ -871,6 +884,37 @@ export const useEditorStore = create<EditorState>()(
         });
         if (get().selectedOperationId === id) set((s) => void (s.selectedOperationId = null));
       },
+
+      setOperationOverride: (id, patch) =>
+        commit((p) => {
+          if (!p.machining.overrides) p.machining.overrides = {};
+          p.machining.overrides[id] = { ...p.machining.overrides[id], ...patch };
+        }),
+
+      resetOperationToRule: (id) =>
+        commit((p) => {
+          if (p.machining.overrides) delete p.machining.overrides[id];
+        }),
+
+      setConnectionType: (id, type) =>
+        commit((p) => {
+          const conn = p.hardwareConnections.find((c) => c.id === id);
+          if (!conn) return;
+          conn.connectionType = type;
+          // Подбираем крепёж соответствующей категории: существующий или из каталога.
+          const category = categoryOfConnectionType(type);
+          const existing = p.hardware.find((h) => h.category === category);
+          if (existing) {
+            conn.hardwareId = existing.id;
+            return;
+          }
+          const tpl = catalogByCategory(category)[0];
+          if (tpl) {
+            const hw = hardwareFromTemplate(tpl);
+            p.hardware.push(hw);
+            conn.hardwareId = hw.id;
+          }
+        }),
 
       selectOperation: (id) => set((s) => void (s.selectedOperationId = id)),
 
