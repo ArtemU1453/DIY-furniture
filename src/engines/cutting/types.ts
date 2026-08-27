@@ -78,6 +78,11 @@ export interface CuttingInput {
   /** Переиспользуемые остатки (используются перед новыми листами). */
   remnantSheets?: RemnantSheet[];
   kerf: Mm;
+  /**
+   * Минимальный технологический зазор между деталями сверх пропила (§39).
+   * Отсутствие поля = 0 — поведение до этапа 25 сохраняется.
+   */
+  minGap?: Mm;
   trim: TrimSettings;
   options: CuttingOptions;
   locked?: LockedPlacement[];

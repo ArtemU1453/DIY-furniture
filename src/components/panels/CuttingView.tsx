@@ -4,6 +4,8 @@ import {
   isCuttingStale, m2, reportToCsv, reportToJson, resultToSvg, sheetToSvg,
   cuttingPartsCsv, wasteReportCsv, compareAlgorithms, listCuttingEngines,
   cuttingCsv, remnantsCsv, cuttingSummary, instanceCounts, placementLabel, parseInstance,
+  cutListCsv, cuttingPlanJson, cuttingLabels, labelsCsv,
+  QUALITY_LABEL, allPresets, isPlanLocked, planQuality, planStatus, qualityThresholds,
   type AlgorithmComparisonRow,
 } from '@/engines/cutting';
 import { SORT_STRATEGIES } from '@/engines/cutting';
@@ -11,6 +13,7 @@ import { printPages, downloadSvg } from '@/features/documents/print';
 import { allParts } from '@/core/model/selectors';
 import { rotateSideFlags } from '@/engines/edges';
 import { CuttingMap, type CuttingMapHandle, type EdgeFlags } from './CuttingMap';
+import { CuttingTable } from './CuttingTable';
 import { SheetLibraryDialog } from './SheetLibraryDialog';
 import { RemnantLibraryDialog } from './RemnantLibraryDialog';
 import type { CuttingResult, OptimizationMode, Part, PieceRotation, Placement } from '@/core/model/types';
@@ -60,6 +63,10 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
   const updateSettings = useEditorStore((s) => s.updateCuttingSettings);
   const saveRemnants = useEditorStore((s) => s.saveUsableRemnantsFromResult);
   const applyReport = useEditorStore((s) => s.applyCuttingReport);
+  const setPlanLocked = useEditorStore((s) => s.setPlanLocked);
+  const applyPresetAction = useEditorStore((s) => s.applyCuttingPreset);
+  const savePreset = useEditorStore((s) => s.saveCuttingPreset);
+  const setThresholds = useEditorStore((s) => s.setQualityThresholds);
 
   const [filter, setFilter] = useState<'all' | MaterialId>('all');
   const [mode, setMode] = useState<'auto' | 'manual'>('auto');
@@ -68,6 +75,9 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
   const [remnantLibOpen, setRemnantLibOpen] = useState(false);
   const mapRef = useRef<CuttingMapHandle>(null);
   const [comparison, setComparison] = useState<AlgorithmComparisonRow[] | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [sheetView, setSheetView] = useState<number | 'all'>('all');
+  const [showTable, setShowTable] = useState(false);
 
   const report = project.cutting.report;
   const stale = isCuttingStale(project);
@@ -89,7 +99,13 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
     if (!report) return [];
     return filter === 'all' ? report.jobs : report.jobs.filter((j) => j.materialId === filter);
   }, [report, filter]);
-  const sheets = useMemo(() => jobs.flatMap((j) => j.sheets), [jobs]);
+  const allSheets = useMemo(() => jobs.flatMap((j) => j.sheets), [jobs]);
+  /* §118/§119: можно смотреть весь раскрой сразу или один лист. */
+  const sheets = useMemo(
+    () => (sheetView === 'all' ? allSheets : allSheets.filter((_, i) => i === sheetView)),
+    [allSheets, sheetView],
+  );
+  const thresholds = useMemo(() => qualityThresholds(project), [project]);
   const warnings = useMemo(() => jobs.flatMap((j) => j.warnings), [jobs]);
   const usableRemnantCount = useMemo(
     () => jobs.reduce((n, j) => n + j.sheets.reduce((k, s) => k + s.remnants.filter((r) => r.usable).length, 0), 0),
@@ -205,8 +221,17 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
     img.src = url;
   };
 
+  /* §105/§106: на каждом листе PDF есть материал, толщина, размер листа,
+   * его номер из общего количества, карта, детали, отход и использование. */
   const exportPdf = () => {
-    const pages = jobs.flatMap((j) => j.sheets.map((s) => sheetToSvg(s, j.statistics.materialName)));
+    const pages = jobs.flatMap((j) =>
+      j.sheets.map((s, i) =>
+        sheetToSvg(s, j.statistics.materialName, {
+          thickness: thicknessById[String(j.materialId)],
+          sheetOf: `${i + 1} из ${j.sheets.length}`,
+        }),
+      ),
+    );
     if (pages.length === 0) return;
     printPages('Карта раскроя', pages);
   };
@@ -245,6 +270,9 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
         <button onClick={() => mapRef.current?.zoomIn()} disabled={!report} title="Увеличить">+</button>
         <button onClick={() => mapRef.current?.fit()} disabled={!report}>По экрану</button>
         <button onClick={() => mapRef.current?.reset100()} disabled={!report}>100%</button>
+        <button onClick={() => setFullscreen((v) => !v)} disabled={!report} title="Во весь экран (§120)">
+          {fullscreen ? 'Свернуть' : 'Во весь экран'}
+        </button>
         <span className="sep" />
         <button onClick={onCompare} disabled={running}>Сравнить алгоритмы</button>
         <span className="sep" />
@@ -257,10 +285,14 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
         <button onClick={() => report && download('cutting_parts.csv', cuttingPartsCsv(report, thicknessById), 'text/csv')} disabled={!report} title="cutting_parts.csv">Детали CSV</button>
         <button onClick={() => report && download('waste_report.csv', wasteReportCsv(report), 'text/csv')} disabled={!report} title="waste_report.csv">Отходы CSV</button>
         <button onClick={() => report && download('cutting.json', reportToJson(report), 'application/json')} disabled={!report}>JSON</button>
+        <button onClick={() => download('cutting-plan.json', cuttingPlanJson(project), 'application/json')} disabled={!report} title="Самодостаточная карта раскроя (§102)">cutting-plan.json</button>
+        <button onClick={() => download('cut-list.csv', cutListCsv(project), 'text/csv')} title="Part ID, Name, Material, Thickness, Width, Height, Quantity, Grain, Edge Band">cut-list.csv</button>
+        <button onClick={() => download('labels.csv', labelsCsv(cuttingLabels(project)), 'text/csv')} disabled={!report} title="Этикетки деталей с кодом QR/штрихкода">Этикетки</button>
         <span style={{ marginLeft: 'auto' }} />
         <button onClick={() => setSheetLibOpen(true)}>Листы…</button>
         <button onClick={() => setRemnantLibOpen(true)}>Остатки…</button>
         <button onClick={() => setShowSettings((v) => !v)}>{showSettings ? 'Скрыть параметры' : 'Параметры'}</button>
+        <button onClick={() => setShowTable((v) => !v)} disabled={!report}>{showTable ? 'Скрыть таблицу' : 'Таблица раскроя'}</button>
         {settings.locked.length > 0 && <button onClick={() => { clearLocked(); void recalc(); }}>Сбросить ручное</button>}
       </div>
 
@@ -286,9 +318,39 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
               {SORT_STRATEGIES.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </label>
+          <label style={lbl}>Пресет
+            <select
+              data-testid="cutting-preset"
+              style={{ width: 'auto' }}
+              value={settings.activePresetId ?? ''}
+              onChange={(e) => { if (e.target.value) applyPresetAction(e.target.value); }}
+            >
+              <option value="">Свои параметры</option>
+              {allPresets(settings).map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.name}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            style={{ fontSize: 11 }}
+            onClick={() => {
+              const name = window.prompt('Название пресета', 'Мой раскрой');
+              if (name) savePreset(name);
+            }}
+          >Сохранить пресет</button>
           <label style={lbl}>Пропил, мм
             <input type="number" min={0} step={0.1} style={num} value={settings.kerfOverride ?? ''} placeholder="из мат."
               onChange={(e) => updateSettings({ kerfOverride: e.target.value === '' ? undefined : Number(e.target.value) })} />
+          </label>
+          <label style={lbl}>Зазор, мм
+            <input data-testid="cutting-mingap" type="number" min={0} step={0.5} style={num} value={settings.minGap ?? 0}
+              title="Минимальный технологический зазор между деталями сверх пропила"
+              onChange={(e) => updateSettings({ minGap: Math.max(0, Number(e.target.value) || 0) })} />
+          </label>
+          <label style={lbl}>Диск, мм
+            <input type="number" min={0} step={0.1} style={num} value={settings.bladeWidth ?? ''} placeholder="—"
+              title="Ширина пильного диска: рез не бывает уже диска"
+              onChange={(e) => updateSettings({ bladeWidth: e.target.value === '' ? undefined : Number(e.target.value) })} />
           </label>
           <span style={lbl}>Отступы
             {(['left', 'right', 'top', 'bottom'] as const).map((side) => (
@@ -304,6 +366,12 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
             <input type="checkbox" checked={settings.useRemnants} onChange={(e) => updateSettings({ useRemnants: e.target.checked })} />
             Использовать остатки ({project.remnants.length})
           </label>
+          <span style={lbl}>Пороги качества, %
+            {(['excellent', 'good', 'average'] as const).map((k) => (
+              <input key={k} type="number" min={0} max={100} style={num} title={k} value={thresholds[k]}
+                onChange={(e) => setThresholds({ ...thresholds, [k]: Number(e.target.value) || 0 })} />
+            ))}
+          </span>
           {filter !== 'all' && (
             <label style={lbl}>Формат листа
               <select style={{ width: 'auto' }} value={settings.sheetSelection[filter] ?? ''} onChange={(e) => updateSettings({ sheetSelection: { ...settings.sheetSelection, [filter]: e.target.value } })}>
@@ -380,9 +448,24 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
               ))}
             </div>
           )}
-          {jobs.map((job) => (
-            <div key={job.materialId} style={{ marginBottom: 14 }}>
+          {jobs.map((job) => {
+            const status = planStatus(project, job);
+            const quality = planQuality(job, thresholds);
+            const locked = isPlanLocked(project, job.materialId);
+            return (
+            <div key={job.materialId} data-plan-material={String(job.materialId)} style={{ marginBottom: 14 }}>
               <h3 style={hdr}>{job.statistics.materialName}</h3>
+              {/* Состояние карты (§88–§95) и класс качества (§132) */}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+                <span data-plan-status style={{ fontSize: 11, color: PLAN_STATUS_COLOR[status] }}>{status}</span>
+                <span className="dim" style={{ fontSize: 11 }}>· {QUALITY_LABEL[quality]}</span>
+                {job.planVersion != null && <span className="dim" style={{ fontSize: 11 }}>· v{job.planVersion}</span>}
+                <button
+                  style={{ fontSize: 11, marginLeft: 'auto' }}
+                  onClick={() => setPlanLocked(job.materialId, !locked)}
+                  title={locked ? 'Пересчёт снова будет менять эту карту' : 'Автоматический пересчёт не будет менять эту карту'}
+                >{locked ? 'Разблокировать' : 'Зафиксировать'}</button>
+              </div>
               <Row k="Деталей" v={String(job.statistics.pieceCount)} />
               <Row k="Листов" v={String(job.statistics.sheetCount)} />
               <Row k="Площадь деталей" v={`${m2(job.statistics.piecesAreaMm2)} м²`} />
@@ -400,7 +483,8 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
 
           {report && (
             <>
@@ -444,7 +528,42 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
         </aside>
 
         {/* Карта раскроя */}
-        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+        <div
+          style={
+            fullscreen
+              ? { position: 'fixed', inset: 0, zIndex: 50, background: 'var(--bg,#0f1012)', display: 'flex', flexDirection: 'column' }
+              : { flex: 1, minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'column' }
+          }
+        >
+          {/* Вкладки материалов (§117) и навигация по листам (§118/§119) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', fontSize: 12 }}>
+            <button
+              style={filter === 'all' ? tabActive : tab}
+              onClick={() => { setFilter('all'); setSheetView('all'); }}
+            >Все материалы</button>
+            {project.materials.map((m) => (
+              <button key={m.id} data-material-tab={String(m.id)}
+                style={filter === m.id ? tabActive : tab}
+                onClick={() => { setFilter(m.id); setSheetView('all'); }}
+              >{m.name}</button>
+            ))}
+            <span style={{ marginLeft: 'auto' }} />
+            <button disabled={sheetView === 'all' || sheetView === 0}
+              onClick={() => setSheetView((v) => (typeof v === 'number' ? Math.max(0, v - 1) : 0))}>◀</button>
+            <span data-sheet-counter className="dim">
+              {sheetView === 'all'
+                ? `Листов: ${allSheets.length}`
+                : `Лист ${(sheetView as number) + 1} из ${allSheets.length}`}
+            </span>
+            <button disabled={sheetView === 'all' || (sheetView as number) >= allSheets.length - 1}
+              onClick={() => setSheetView((v) => (typeof v === 'number' ? Math.min(allSheets.length - 1, v + 1) : 0))}>▶</button>
+            <button onClick={() => setSheetView((v) => (v === 'all' ? 0 : 'all'))} disabled={allSheets.length === 0}>
+              {sheetView === 'all' ? 'По одному листу' : 'Все листы'}
+            </button>
+            {/* В полноэкранном режиме панель инструментов перекрыта картой,
+                поэтому выход из него живёт здесь, в самой карте (§120). */}
+            {fullscreen && <button onClick={() => setFullscreen(false)}>Выйти из полного экрана</button>}
+          </div>
           {sheets.length > 0 ? (
             <CuttingMap ref={mapRef} sheets={sheets} selectedPieceId={selectedPieceId} manual={manual} onSelect={(id) => { selectPiece(id); const pl = sheets.flatMap((s) => s.placements).find((x) => x.pieceId === id); if (pl) selectPart(pl.partId); }} onMove={onMove} grainOf={grainOf} edgesOf={edgesOf} />
           ) : (
@@ -488,6 +607,8 @@ export function CuttingView({ onOpenDrawing, onOpenIn3D, onOpenPart }: CuttingVi
         )}
       </div>
 
+      {showTable && !fullscreen && <CuttingTable onOpenPart={onOpenPart} />}
+
       {sheetLibOpen && <SheetLibraryDialog onClose={() => setSheetLibOpen(false)} />}
       {remnantLibOpen && <RemnantLibraryDialog onClose={() => setRemnantLibOpen(false)} />}
     </div>
@@ -502,6 +623,18 @@ function Row({ k, v }: { k: string; v: string }) {
     </div>
   );
 }
+
+const PLAN_STATUS_COLOR: Record<string, string> = {
+  VALID: 'var(--ok,#4caf50)',
+  WARNING: 'var(--warn,#e0a030)',
+  ERROR: 'var(--danger,#e05252)',
+  DIRTY: 'var(--warn,#e0a030)',
+  OUTDATED: 'var(--warn,#e0a030)',
+  LOCKED: 'var(--accent,#5a9cf8)',
+};
+
+const tab: React.CSSProperties = { fontSize: 11, padding: '2px 8px', background: 'transparent' };
+const tabActive: React.CSSProperties = { ...tab, borderColor: 'var(--accent)', color: 'var(--accent)' };
 
 const hdr: React.CSSProperties = { fontSize: 12, margin: '0 0 6px', color: 'var(--text)' };
 const lbl: React.CSSProperties = { display: 'flex', gap: 6, alignItems: 'center', width: 'auto', color: 'var(--dim, #9aa0a6)' };

@@ -72,6 +72,7 @@ import {
 import type {
   CuttingReport,
   CuttingSettings,
+  QualityThresholds,
   EdgeMaterial,
   Furniture,
   Hardware,
@@ -100,6 +101,15 @@ import type {
 import { newSheetMaterialId, newStoredRemnantId } from '@/core/model/ids';
 import { runCuttingInWorker, type CuttingHandle } from '@/workers/cuttingClient';
 import type { CuttingProgress } from '@/engines/cutting';
+import {
+  applyPlans,
+  applyPreset,
+  canRemoveSheet,
+  findPreset,
+  presetFromSettings,
+  refreshPlanStatuses,
+  validThresholds,
+} from '@/engines/cutting';
 import { documentsSignature, nextDocVersion } from '@/engines/drawing';
 import { runProductionCheck } from '@/engines/status';
 import type { ProjectIssue } from '@/engines/status';
@@ -510,10 +520,24 @@ export interface EditorState {
   toggleLockedPlacement: (placement: LockedPlacement) => void;
   rotatePlacement: (placement: LockedPlacement) => void;
   selectCuttingPiece: (pieceId: string | null) => void;
+  /** Зафиксировать/освободить карту раскроя материала (§90/§92). */
+  setPlanLocked: (materialId: MaterialId, locked: boolean) => void;
+  /** Снять фиксацию со всех карт (§92). */
+  unlockAllPlans: () => void;
+  /** Применить пресет раскроя (§82). */
+  applyCuttingPreset: (presetId: string) => boolean;
+  /** Сохранить текущие настройки как пользовательский пресет (§84). */
+  saveCuttingPreset: (name: string) => string;
+  removeCuttingPreset: (presetId: string) => void;
+  /** Задать пороги классификации качества (§133). */
+  setQualityThresholds: (thresholds: QualityThresholds) => boolean;
   // Библиотека листов.
   addSheetMaterial: (sheet: Omit<SheetMaterial, 'id'>) => string;
   updateSheetMaterial: (id: string, patch: Partial<SheetMaterial>) => void;
-  removeSheetMaterial: (id: string) => void;
+  /** Удалить формат листа. Отказ, если он используется активной картой (§79). */
+  removeSheetMaterial: (id: string) => { ok: boolean; reason?: string };
+  /** Отправить формат в архив или вернуть из архива (§80). */
+  setSheetArchived: (id: string, archived: boolean) => void;
   // Библиотека остатков.
   saveRemnant: (remnant: Omit<StoredRemnant, 'id' | 'createdAt'>) => string;
   saveUsableRemnantsFromResult: () => number;
@@ -1876,7 +1900,10 @@ export const useEditorStore = create<EditorState>()(
         try {
           const report: CuttingReport = await handle.promise;
           set((s) => {
-            s.project.cutting.report = report;
+            /* §86/§87: новый отчёт становится активным только целиком и
+             * только после успешного расчёта; зафиксированные карты (§91)
+             * переносятся из прежнего отчёта нетронутыми. */
+            s.project.cutting.report = applyPlans(s.project, report);
             s.cuttingRunning = false;
             s.cuttingProgress = null;
           });
@@ -1902,7 +1929,7 @@ export const useEditorStore = create<EditorState>()(
 
       applyCuttingReport: (report, algorithmId) =>
         commit((p) => {
-          p.cutting.report = report;
+          p.cutting.report = applyPlans(p, report);
           if (algorithmId) p.cutting.settings.algorithm = algorithmId;
         }),
 
@@ -1939,6 +1966,58 @@ export const useEditorStore = create<EditorState>()(
 
       selectCuttingPiece: (pieceId) => set((s) => void (s.selectedCuttingPieceId = pieceId)),
 
+      // ── Карты раскроя: фиксация, пресеты, качество ───────────────────────
+      setPlanLocked: (materialId, locked) =>
+        commit((p) => {
+          const map = p.cutting.settings.lockedPlans ?? {};
+          if (locked) map[String(materialId)] = true;
+          else delete map[String(materialId)];
+          p.cutting.settings.lockedPlans = map;
+          const refreshed = refreshPlanStatuses(p);
+          if (refreshed) p.cutting.report = refreshed;
+        }),
+
+      unlockAllPlans: () =>
+        commit((p) => {
+          p.cutting.settings.lockedPlans = {};
+          const refreshed = refreshPlanStatuses(p);
+          if (refreshed) p.cutting.report = refreshed;
+        }),
+
+      applyCuttingPreset: (presetId) => {
+        const preset = findPreset(get().project.cutting.settings, presetId);
+        if (!preset) return false;
+        commit((p) => {
+          p.cutting.settings = applyPreset(p.cutting.settings, preset);
+        });
+        return true;
+      },
+
+      saveCuttingPreset: (name) => {
+        const id = `preset-user-${Date.now().toString(36)}`;
+        commit((p) => {
+          const preset = presetFromSettings(p.cutting.settings, id, name.trim() || 'Мой пресет');
+          p.cutting.settings.presets = [...(p.cutting.settings.presets ?? []), preset];
+          p.cutting.settings.activePresetId = id;
+        });
+        return id;
+      },
+
+      removeCuttingPreset: (presetId) =>
+        commit((p) => {
+          // Встроенные пресеты не удаляются (§83) — они не лежат в проекте.
+          p.cutting.settings.presets = (p.cutting.settings.presets ?? []).filter((x) => x.id !== presetId);
+          if (p.cutting.settings.activePresetId === presetId) delete p.cutting.settings.activePresetId;
+        }),
+
+      setQualityThresholds: (thresholds) => {
+        if (!validThresholds(thresholds)) return false;
+        commit((p) => {
+          p.cutting.settings.qualityThresholds = { ...thresholds };
+        });
+        return true;
+      },
+
       // ── Библиотека листов ────────────────────────────────────────────────
       addSheetMaterial: (sheet) => {
         const id = newSheetMaterialId();
@@ -1950,13 +2029,29 @@ export const useEditorStore = create<EditorState>()(
           const s = p.sheets.find((x) => x.id === id);
           if (s) Object.assign(s, patch);
         }),
-      removeSheetMaterial: (id) =>
+      /* §79: формат, на котором построена активная карта, не удаляется —
+       * иначе сохранённый раскрой становится невоспроизводимым. Для вывода
+       * из оборота есть архив (§80). */
+      removeSheetMaterial: (id) => {
+        const guard = canRemoveSheet(get().project, id);
+        if (!guard.ok) return guard;
         commit((p) => {
           p.sheets = p.sheets.filter((s) => s.id !== id);
           // Снять выбор формата, ссылавшийся на удалённый лист.
           for (const [mat, sel] of Object.entries(p.cutting.settings.sheetSelection)) {
             if (sel === id) delete p.cutting.settings.sheetSelection[mat];
           }
+          for (const [mat, list] of Object.entries(p.cutting.settings.sheetPriority)) {
+            p.cutting.settings.sheetPriority[mat] = list.filter((x) => x !== id);
+          }
+        });
+        return { ok: true };
+      },
+
+      setSheetArchived: (id, archived) =>
+        commit((p) => {
+          const sheet = p.sheets.find((x) => x.id === id);
+          if (sheet) sheet.archived = archived;
         }),
 
       // ── Библиотека остатков ──────────────────────────────────────────────

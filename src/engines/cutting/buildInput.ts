@@ -11,6 +11,7 @@ import type { Material, Project, SheetMaterial } from '@/core/model/types';
 import type { MaterialId } from '@/core/model/ids';
 import { allParts } from '@/core/model/selectors';
 import type { CuttingInput, CuttingPieceInstance, RemnantSheet } from './types';
+import { profileSignature, resolveCuttingProfile } from './profile';
 
 function planeDims(part: { width: number; height: number }): { length: number; width: number } {
   return { length: Math.max(part.width, part.height), width: Math.min(part.width, part.height) };
@@ -52,7 +53,8 @@ export function buildPieceInstances(project: Project): Map<MaterialId, CuttingPi
  * форматы библиотеки по убыванию площади. Алгоритм пробует их по очереди.
  */
 export function sheetFormatsFor(project: Project, material: Material): SheetMaterial[] {
-  const forMaterial = project.sheets.filter((s) => s.materialId === material.id);
+  // Архивный формат физически недоступен и в новый раскрой не идёт (§80).
+  const forMaterial = project.sheets.filter((s) => s.materialId === material.id && s.archived !== true);
   if (forMaterial.length === 0) return [];
   const byId = new Map(forMaterial.map((s) => [s.id, s]));
   const out: SheetMaterial[] = [];
@@ -66,6 +68,17 @@ export function sheetFormatsFor(project: Project, material: Material): SheetMate
   return out;
 }
 
+/**
+ * Доступное количество листов формата (§9/§10). LIMITED — ровно
+ * availableQuantity; INFINITE — 0 («без ограничения»). Формат без stockMode
+ * читается по старому правилу: availableQuantity как есть.
+ */
+export function stockQuantityOf(sheet: SheetMaterial): number {
+  if (sheet.stockMode === 'INFINITE') return 0;
+  if (sheet.stockMode === 'LIMITED') return Math.max(0, sheet.availableQuantity);
+  return sheet.availableQuantity;
+}
+
 /** Выбранный формат листа из библиотеки для материала (или из материала). */
 function selectedSheet(project: Project, material: Material): SheetMaterial | undefined {
   return sheetFormatsFor(project, material)[0];
@@ -76,13 +89,9 @@ function sheetFor(project: Project, material: Material): { length: number; width
   if (override) return { length: override.length, width: override.width };
   const chosen = selectedSheet(project, material);
   if (chosen) {
-    return { length: chosen.height, width: chosen.width, sheetMaterialId: chosen.id, availableQuantity: chosen.availableQuantity };
+    return { length: chosen.height, width: chosen.width, sheetMaterialId: chosen.id, availableQuantity: stockQuantityOf(chosen) };
   }
   return { length: material.sheet.length, width: material.sheet.width };
-}
-
-function kerfFor(project: Project, material: Material): number {
-  return project.cutting.settings.kerfOverride ?? material.kerf ?? project.settings.kerf;
 }
 
 /** Переиспользуемые остатки для материала (если включено использование остатков). */
@@ -110,10 +119,14 @@ export function buildCuttingInputs(project: Project, materialFilter?: MaterialId
     if (!material) continue;
     const locked = settings.locked.filter((l) => pieces.some((p) => p.pieceId === l.pieceId));
     const sheet = sheetFor(project, material);
+    /* Профиль реза (§17/§18) — единый источник пропила, зазора и обрезки;
+     * припуск выбранного формата листа входит в обрезку (§4/§19). */
+    const chosenFormat = project.sheets.find((sh) => sh.id === sheet.sheetMaterialId);
+    const profile = resolveCuttingProfile(project, material, chosenFormat);
     // Альтернативные форматы (для деталей, не влезающих в предпочтительный).
     const alternates = sheetFormatsFor(project, material)
       .slice(1)
-      .map((sh) => ({ id: sh.id, length: sh.height, width: sh.width, availableQuantity: sh.availableQuantity }));
+      .map((sh) => ({ id: sh.id, length: sh.height, width: sh.width, availableQuantity: stockQuantityOf(sh) }));
     inputs.push({
       materialId,
       pieces,
@@ -122,8 +135,9 @@ export function buildCuttingInputs(project: Project, materialFilter?: MaterialId
       availableQuantity: sheet.availableQuantity,
       alternateSheets: alternates,
       remnantSheets: remnantSheetsFor(project, materialId),
-      kerf: kerfFor(project, material),
-      trim: { ...settings.trim },
+      kerf: profile.kerf,
+      minGap: profile.minGap,
+      trim: profile.trimming,
       options: {
         respectGrain: settings.respectGrain,
         attempts: settings.attempts,
@@ -166,7 +180,7 @@ export function productionSignature(project: Project): string {
     .map((m) => `${m.id}:${m.thickness}:${m.sheet.length}x${m.sheet.width}:${m.grain}:${m.allowRotate}`)
     .sort();
   const sheets = project.sheets
-    .map((sh) => `${sh.id}:${sh.materialId}:${sh.height}x${sh.width}x${sh.thickness}:${sh.grainDirection}:${sh.availableQuantity}`)
+    .map((sh) => `${sh.id}:${sh.materialId}:${sh.height}x${sh.width}x${sh.thickness}:${sh.grainDirection}:${sh.availableQuantity}:${sh.stockMode ?? ''}:${sh.archived ? 'arch' : ''}:${sh.edgeAllowance ?? 0}`)
     .sort();
   const remnants = project.cutting.settings.useRemnants
     ? project.remnants.map((r) => `${r.id}:${r.materialId}:${r.width}x${r.height}`).sort()
@@ -187,6 +201,9 @@ export function productionSignature(project: Project): string {
     `selection:${JSON.stringify(s.sheetSelection)}`,
     `priority:${JSON.stringify(s.sheetPriority)}`,
     `fewerSheets:${s.preferFewerSheets}`,
+    /* Профиль реза целиком: смена зазора или диска меняет карту, без этого
+     * сохранённый раскрой молча оставался бы «актуальным» (§88). */
+    `profile:${profileSignature(resolveCuttingProfile(project))}`,
   ];
   return hash([...parts, ...mats, ...sheets, ...remnants, ...cfg].join('|'));
 }

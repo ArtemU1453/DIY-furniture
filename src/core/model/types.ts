@@ -852,6 +852,10 @@ export interface Placement {
   locked: boolean;
   /** Порядок реза на листе (1..N). Задел под будущий оптимизатор реза/CNC. */
   cutOrder?: number;
+  /** Лист, на котором лежит деталь (§24). Дублирует владельца для экспорта. */
+  sheetId?: string;
+  /** Направление текстуры детали в размещённом положении (§24/§35). */
+  grainDirection?: GrainDirection;
 }
 
 /** Прямоугольный остаток листа. `usable` — годен по критериям полезного остатка. */
@@ -975,6 +979,16 @@ export interface CuttingResult {
    * воспроизвести раскрой даже если настройки проекта уже изменились.
    */
   settingsSnapshot?: CuttingSettingsSnapshot;
+  /** Стабильный id карты раскроя (§25): `plan:<materialId>`. */
+  planId?: string;
+  /** Версия карты (§93): увеличивается при каждом успешном пересчёте. */
+  planVersion?: number;
+  /** Состояние карты (§88–§95). Вычисляется, в проекте хранится как отметка. */
+  status?: CuttingPlanStatus;
+  /** Карта зафиксирована пользователем (§90). */
+  locked?: boolean;
+  /** Снимок исходных данных (§94) для определения OUTDATED (§95). */
+  sourceSnapshot?: CuttingSourceSnapshot;
 }
 
 /**
@@ -1032,6 +1046,85 @@ export interface UsableRemnantCriteria {
   minArea: number; // мм²
 }
 
+/**
+ * Разрешённый технологический профиль реза (§17). НЕ отдельная сущность
+ * проекта: это вычисленный вид поверх Material.kerf, ProjectSettings.kerf и
+ * CuttingSettings — второй профиль не заводится (§18).
+ */
+export interface CuttingProfile {
+  /** Ширина пропила, мм (например 3.2). */
+  kerf: Mm;
+  /** Обрезка кромок листа (§19). */
+  trimming: TrimSettings;
+  /** Минимальный технологический зазор между деталями, мм (§39). */
+  minGap: Mm;
+  /**
+   * Ширина пильного диска, мм (§17). Если задана и не совпадает с kerf —
+   * фактическим пропилом считается большее значение.
+   */
+  bladeWidth?: Mm;
+}
+
+/**
+ * Пресет раскроя (§82–§84) — именованный набор технологических параметров.
+ * Пресет НЕ хранит результат: он применяется к CuttingSettings.
+ */
+export interface CuttingPreset {
+  id: string;
+  name: string;
+  description?: string;
+  kerf: Mm;
+  minGap: Mm;
+  bladeWidth?: Mm;
+  trim: TrimSettings;
+  respectGrain: boolean;
+  useRemnants: boolean;
+  algorithm: string;
+  optimizationMode: OptimizationMode;
+  /** Встроенный пресет нельзя удалить, можно только скопировать. */
+  builtIn?: boolean;
+}
+
+/**
+ * Пороги производственной классификации качества раскроя (§132/§133).
+ * Значения — нижние границы utilization в процентах; настраиваются
+ * пользователем, субъективных оценок в коде нет.
+ */
+export interface QualityThresholds {
+  excellent: number; // ≥ excellent → EXCELLENT
+  good: number;      // ≥ good → GOOD
+  average: number;   // ≥ average → AVERAGE, ниже → POOR
+}
+
+export type CuttingQuality = 'EXCELLENT' | 'GOOD' | 'AVERAGE' | 'POOR';
+
+/**
+ * Состояние карты раскроя (§88/§89/§90/§95).
+ * VALID    — рассчитана по текущим данным, все детали размещены;
+ * WARNING  — рассчитана, но utilization ниже порога (§131);
+ * ERROR    — есть неразмещённые детали (§130);
+ * DIRTY    — изменились детали/материал/склад/профиль, нужен пересчёт;
+ * OUTDATED — снимок исходных данных не совпадает с проектом (§95);
+ * LOCKED   — план зафиксирован пользователем и не пересчитывается (§91).
+ */
+export type CuttingPlanStatus = 'VALID' | 'WARNING' | 'ERROR' | 'DIRTY' | 'OUTDATED' | 'LOCKED';
+
+/**
+ * Снимок исходных данных плана (§94). По нему определяется OUTDATED без
+ * повторного расчёта: те же входные данные → тот же план.
+ */
+export interface CuttingSourceSnapshot {
+  /** Сигнатура материала (id, толщина, текстура, поворот). */
+  material: string;
+  /** Сигнатура технологического профиля (kerf, minGap, обрезка). */
+  profile: string;
+  /** Количества деталей: partId → quantity. */
+  quantities: Record<string, number>;
+  /** Сигнатура доступного склада листов и остатков. */
+  stock: string;
+  createdAt: string; // ISO
+}
+
 /** Настройки раскроя (сохраняются в проекте). */
 export interface CuttingSettings {
   respectGrain: boolean;
@@ -1055,6 +1148,24 @@ export interface CuttingSettings {
   sheetPriority: Record<string, string[]>;
   /** Стратегия: меньше листов (по умолчанию) или выше использование материала. */
   preferFewerSheets: boolean;
+  /**
+   * Минимальный зазор между деталями сверх пропила, мм (§39). Отсутствие
+   * поля = 0: проекты до этого этапа считаются как раньше.
+   */
+  minGap?: Mm;
+  /** Ширина пильного диска, мм (§17). */
+  bladeWidth?: Mm;
+  /** Пользовательские пресеты раскроя (§84). Встроенные живут в движке. */
+  presets?: CuttingPreset[];
+  /** Применённый пресет (§82). */
+  activePresetId?: string;
+  /** Пороги классификации качества (§133). */
+  qualityThresholds?: QualityThresholds;
+  /**
+   * Зафиксированные карты раскроя по материалу (§90/§91): materialId → true.
+   * Автоматический пересчёт такие планы не трогает.
+   */
+  lockedPlans?: Record<string, boolean>;
 }
 
 /**
@@ -1067,7 +1178,18 @@ export interface CuttingPath {
   segments: Array<{ x1: Mm; y1: Mm; x2: Mm; y2: Mm; order: number }>;
 }
 
-/** Формат листа в библиотеке (SheetLibrary). Ссылается на материал. */
+/**
+ * Режим запаса листа (§10). INFINITE — материал всегда доступен, раскрой
+ * добавляет листы по необходимости; LIMITED — доступно ровно
+ * `availableQuantity` листов, дальше детали остаются UNPLACED/OUT_OF_STOCK.
+ */
+export type StockMode = 'INFINITE' | 'LIMITED';
+
+/**
+ * Формат листа в библиотеке (StockSheet / SheetLibrary). Ссылается на
+ * существующий Material — толщина и текстура берутся оттуда (§5/§8), поле
+ * `thickness` дублируется только как денормализация для фильтров склада.
+ */
 export interface SheetMaterial {
   id: string;
   materialId: MaterialId;
@@ -1078,7 +1200,22 @@ export interface SheetMaterial {
   grainDirection: GrainDirection;
   availableQuantity: number; // ограниченный запас (0 = без ограничения)
   source: 'library' | 'custom';
+  /**
+   * Режим запаса (§9/§10). Отсутствие поля читается по старому правилу:
+   * availableQuantity === 0 → INFINITE, иначе LIMITED.
+   */
+  stockMode?: StockMode;
+  /**
+   * Технологический припуск по краю листа, мм (§4). Если задан — применяется
+   * как обрезка по всем четырём сторонам поверх настроек раскроя (§19).
+   */
+  edgeAllowance?: Mm;
+  /** Разрешён ли поворот самого листа 90° при подборе формата (§48). */
+  allowRotate?: boolean;
+  /** Архивный формат не предлагается в новом раскрое (§80). */
+  archived?: boolean;
   parameters?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 }
 
 /** Сохранённый остаток (RemnantLibrary) — переиспользуемый в будущем раскрое. */
@@ -1099,6 +1236,32 @@ export interface StoredRemnant {
    * до этого этапа, продолжают работать как раньше.
    */
   status?: RemnantStatus;
+}
+
+/**
+ * Этикетка детали (§108/§109). Модель данных без привязки к печатному
+ * движку: тот же объект используется и для списка, и для будущей печати.
+ */
+export interface PartLabel {
+  partId: PartId;
+  /** Номер экземпляра в раскрое (§51), например «2/4». Пусто — деталь целиком. */
+  instance?: string;
+  name: string;
+  number: string;
+  materialName: string;
+  thickness: Mm;
+  width: Mm;
+  height: Mm;
+  quantity: number;
+  edgeSummary: string;
+  grain: GrainDirection;
+  /** Лист, на котором лежит экземпляр (если этикетка из раскроя). */
+  sheetLabel?: string;
+  /**
+   * Локальные данные для QR/штрихкода (§110/§111). Строка, а не картинка:
+   * внешние сервисы генерации не используются (§112).
+   */
+  code: string;
 }
 
 /** Сохранённый результат раскроя + версия исходной модели (для инвалидации). */

@@ -24,6 +24,7 @@ import {
 } from './types';
 import { extractRemnants } from './remnants';
 import { computeCutLines } from './cutlines';
+import { spacingOf } from './profile';
 import { computeSheetStats, computeStatistics } from './metrics';
 import { sheetFormats, formatForPiece, type SheetFormat } from './formats';
 import { toUnplaced } from './unplaced';
@@ -165,7 +166,8 @@ interface AttemptResult {
 /** Одна попытка укладки с заданной стратегией сортировки. */
 function packAttempt(input: CuttingInput, strategyId: string): AttemptResult {
   const respectGrain = input.options.respectGrain;
-  const kerf = input.kerf;
+  // Вокруг детали резервируется пропил ПЛЮС технологический зазор (§38/§39).
+  const kerf = spacingOf({ kerf: input.kerf, minGap: input.minGap });
   const byId = new Map(input.pieces.map((p) => [p.pieceId, p]));
   const remnantSheets = input.remnantSheets ?? [];
   const maxFull = input.availableQuantity && input.availableQuantity > 0 ? input.availableQuantity : Infinity;

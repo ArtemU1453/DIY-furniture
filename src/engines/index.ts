@@ -5,6 +5,8 @@
 import { registerCuttingEngine } from './cutting/CuttingEngine';
 import { MaxRectsEngine } from './cutting/MaxRectsEngine';
 import { GuillotineEngine } from './cutting/GuillotineEngine';
+import { ShelfEngine } from './cutting/ShelfEngine';
+import { SkylineEngine } from './cutting/SkylineEngine';
 import { registerFurnitureEngine, CustomFurnitureEngine } from './furniture/FurnitureEngine';
 import { CabinetEngine } from './furniture/cabinet/CabinetEngine';
 import { registerMachiningEngine, NoopMachiningEngine } from './machining/MachiningEngine';
@@ -18,6 +20,8 @@ export function bootstrapEngines(): void {
 
   registerCuttingEngine(new MaxRectsEngine());
   registerCuttingEngine(new GuillotineEngine());
+  registerCuttingEngine(new ShelfEngine());
+  registerCuttingEngine(new SkylineEngine());
   registerFurnitureEngine(new CustomFurnitureEngine());
   registerFurnitureEngine(new CabinetEngine());
   registerMachiningEngine(new NoopMachiningEngine());
