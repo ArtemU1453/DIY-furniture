@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useEditorStore, type DisplayMode } from '@/app/store/editorStore';
+import { useEditorStore, type DisplayMode, type MachiningMode } from '@/app/store/editorStore';
 import { allParts, findPart } from '@/core/model/selectors';
 import { partsToStl, partsToObj, VIEW_HOTKEYS, type StandardView } from '@/engines/viewer';
 import type { PartId } from '@/core/model/ids';
@@ -117,7 +117,13 @@ export function EditorToolbar({
       <label style={chk}><input type="checkbox" checked={viewer.showAxes} onChange={(e) => setViewer({ showAxes: e.target.checked })} />Оси</label>
       <label style={chk}><input type="checkbox" checked={viewer.showDimensions} onChange={(e) => setViewer({ showDimensions: e.target.checked })} />Габариты</label>
       <label style={chk}><input type="checkbox" checked={viewer.showHardware} onChange={(e) => setViewer({ showHardware: e.target.checked })} />Фурнитура</label>
-      <label style={chk}><input type="checkbox" checked={viewer.showMachining} onChange={(e) => setViewer({ showMachining: e.target.checked })} />Присадка</label>
+      <label style={lbl}>Присадка
+        <select style={{ width: 'auto' }} value={viewer.machiningMode} onChange={(e) => setViewer({ machiningMode: e.target.value as MachiningMode })}>
+          <option value="off">Выкл.</option>
+          <option value="all">Все детали</option>
+          <option value="selected">Только выбранная</option>
+        </select>
+      </label>
       <span style={{ marginLeft: 'auto' }} />
       <button onClick={() => download('model.stl', partsToStl(parts, project.name), 'model/stl')}>STL</button>
       <button onClick={() => download('model.obj', partsToObj(parts, project.name), 'model/obj')}>OBJ</button>

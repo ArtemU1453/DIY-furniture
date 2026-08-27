@@ -9,6 +9,7 @@ import { PROJECT_FORMAT_VERSION, type Project } from '@/core/model/types';
 import {
   DEFAULT_CUTTING_SETTINGS,
   DEFAULT_MACHINING_CONSTRAINTS,
+  DEFAULT_MANUFACTURING_PROFILE,
   createDefaultSheets,
   makeCuttingSettings,
 } from '@/core/model/factory';
@@ -56,7 +57,15 @@ export function deserializeProject(json: string): Project {
   // Обратная совместимость: поля, появившиеся позже базовой версии 1.0.
   if (!Array.isArray(project.hardwareConnections)) project.hardwareConnections = [];
   if (!project.machining || typeof project.machining !== 'object') {
-    project.machining = { constraints: { ...DEFAULT_MACHINING_CONSTRAINTS } };
+    project.machining = {
+      constraints: { ...DEFAULT_MACHINING_CONSTRAINTS },
+      overrides: {},
+      profile: { ...DEFAULT_MANUFACTURING_PROFILE },
+    };
+  } else {
+    // Обратная совместимость: поля присадки, добавленные на этапе 15.
+    if (!project.machining.overrides) project.machining.overrides = {};
+    if (!project.machining.profile) project.machining.profile = { ...DEFAULT_MANUFACTURING_PROFILE };
   }
   if (!project.cutting || typeof project.cutting !== 'object') {
     project.cutting = { settings: makeCuttingSettings() };

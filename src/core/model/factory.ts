@@ -22,6 +22,7 @@ import {
   type CuttingSettings,
   type Hardware,
   type MachiningConstraints,
+  type ManufacturingProfile,
   type Material,
   type MaterialKind,
   type Part,
@@ -38,6 +39,16 @@ export const DEFAULT_SETTINGS: ProjectSettings = {
   sheetTrim: 10,
   costEnabled: false,
   locale: 'ru',
+};
+
+/** Производственный профиль по умолчанию (§54). */
+export const DEFAULT_MANUFACTURING_PROFILE: ManufacturingProfile = {
+  id: 'default',
+  name: 'Базовый профиль',
+  sawKerf: 3.2,
+  minHoleEdgeDistance: 8,
+  defaultDrillDepth: 12,
+  defaultJointType: 'CONFIRMAT',
 };
 
 export const DEFAULT_MACHINING_CONSTRAINTS: MachiningConstraints = {
@@ -304,7 +315,11 @@ export function createProject(input: CreateProjectInput = {}): Project {
     edges,
     hardware: createDefaultHardware(),
     hardwareConnections: [],
-    machining: { constraints: { ...DEFAULT_MACHINING_CONSTRAINTS } },
+    machining: {
+      constraints: { ...DEFAULT_MACHINING_CONSTRAINTS },
+      overrides: {},
+      profile: { ...DEFAULT_MANUFACTURING_PROFILE },
+    },
     cutting: { settings: makeCuttingSettings() },
     sheets: createDefaultSheets(materials),
     remnants: [],
