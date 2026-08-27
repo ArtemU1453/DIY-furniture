@@ -18,7 +18,8 @@ export function sanitizeFileName(name: string): string {
 }
 
 export type ExportKind =
-  | 'pdf' | 'json' | 'parts' | 'hardware' | 'machining' | 'materials' | 'cutting';
+  | 'pdf' | 'json' | 'parts' | 'hardware' | 'machining' | 'materials' | 'cutting'
+  | 'connections';
 
 const SUFFIX: Record<ExportKind, { suffix: string; ext: string }> = {
   pdf: { suffix: '', ext: 'pdf' },
@@ -28,6 +29,7 @@ const SUFFIX: Record<ExportKind, { suffix: string; ext: string }> = {
   machining: { suffix: '_machining', ext: 'csv' },
   materials: { suffix: '_materials', ext: 'csv' },
   cutting: { suffix: '_cutting', ext: 'csv' },
+  connections: { suffix: '_connections', ext: 'csv' },
 };
 
 /** Имя файла экспорта для проекта: exportFileName('Шкаф', 'parts') → 'Шкаф_parts.csv'. */

@@ -142,7 +142,17 @@ export type MachiningType =
   | 'dowel' // отверстие под шкант
   | 'confirmat' // отверстие под конфирмат
   | 'hinge' // присадка под петлю
+  | 'countersink' // зенковка под потайную головку
+  | 'cut' // рез/выборка по контуру
   | 'custom';
+
+/**
+ * Внешние (производственные) имена операций (§10). Технический MachiningType
+ * остаётся полем модели, а это — то, что видит пользователь и что уходит в
+ * CSV и на чертёж. Соответствие однозначно в обе стороны.
+ */
+export type OperationKind =
+  | 'DRILL' | 'BORE' | 'COUNTERSINK' | 'POCKET' | 'CUT' | 'CUSTOM';
 
 /** Грань детали, с которой заходит инструмент. */
 export type PartFace = 'top' | 'bottom' | 'front' | 'back' | 'left' | 'right';
@@ -329,6 +339,7 @@ export type ConnectionType =
   | 'MINIFIX'
   | 'SCREW'
   | 'CAM_LOCK'
+  | 'CUSTOM'
   | 'OTHER';
 
 /** Тип конструктивного узла (Joint). */
@@ -354,9 +365,32 @@ export interface HardwareConnection {
   connectionType?: ConnectionType;
   jointType?: JointType;
   quantity?: number; // число крепежа в узле (переопределяет parameters.count)
+  /**
+   * Стабильный ключ соединения (§5): CABINET.SIDE.LEFT↔CABINET.TOP.
+   * По нему соединение узнаётся при пересчёте и сохраняет свой id.
+   */
+  stableId?: string;
+  /** Порождено правилом или создано пользователем (§4). */
+  source?: ConnectionSource;
+  /** Результат последней проверки (§45). */
+  status?: ConnectionStatus;
+  /**
+   * Различает несколько одинаковых соединений между одной парой деталей (§44):
+   * например верхний и нижний узел боковины с перегородкой.
+   */
+  position?: string;
   parameters?: Record<string, number | string | boolean>;
   metadata?: Record<string, unknown>;
 }
+
+/** Источник соединения (§4). */
+export type ConnectionSource = 'PARAMETRIC' | 'MANUAL';
+
+/** Состояние соединения после проверки (§45). */
+export type ConnectionStatus = 'VALID' | 'WARNING' | 'ERROR' | 'OUTDATED';
+
+/** Состояние присадки относительно модели (§46). */
+export type MachiningStatus = 'CURRENT' | 'DIRTY' | 'ERROR';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Деталь — центральная производственная сущность

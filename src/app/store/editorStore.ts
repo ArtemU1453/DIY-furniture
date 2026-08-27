@@ -40,6 +40,12 @@ import {
   type PartOverride,
 } from '@/engines/parametric';
 import {
+  cabinetConnectionContext,
+  planConnections,
+  pruneDeadConnections,
+  reconcileConnections,
+} from '@/engines/connections';
+import {
   buildUpdatePatches,
   linkProfile,
   linkToProject,
@@ -80,7 +86,6 @@ import { inferJointType, categoryOfConnectionType } from '@/engines/machining';
 import { hardwareFromTemplate, type HardwareTemplate, catalogByCategory } from '@/core/model/hardwareCatalog';
 import {
   instantiateTemplate,
-  planCabinetConnections,
   findTemplate,
   validateTemplateValues,
   defaultValues,
@@ -270,6 +275,14 @@ export interface EditorState {
   setPartOverride: (partId: PartId, patch: PartOverride) => void;
   /** «Вернуть расчётное значение» (§44). */
   resetPartOverride: (partId: PartId, fields?: Array<keyof PartOverride>) => void;
+
+  // ── Соединения (этап 19) ────────────────────────────────────────────────────
+  /** Пересобрать соединения изделия по правилам (§27/§47). */
+  regenerateConnections: (id: FurnitureId) => {
+    ok: boolean; added: number; removed: number; manual: number; orphaned: number;
+  };
+  /** Убрать соединения, потерявшие деталь (§49). */
+  pruneConnections: () => number;
 
   // ── Типовые конструкции (шаблоны) ──────────────────────────────────────────
   createFromTemplate: (templateId: string, values?: TemplateValues, name?: string) => { ok: boolean; id?: FurnitureId; errors?: TemplateIssue[] };
@@ -606,6 +619,15 @@ export const useEditorStore = create<EditorState>()(
         }
         const diff = diffParametric(before, model, existing);
 
+        /* Соединения пересобираются в ТОМ ЖЕ commit, что и детали (§47):
+         * иначе undo откатил бы детали, оставив соединения от новой
+         * конструкции. Ручные соединения при этом сохраняются (§50). */
+        const reconciled = reconcileConnections(project, result.parts, {
+          jointCategory: model.jointType,
+          construction: model.construction,
+          handles: model.doors.handleEnabled,
+        });
+
         commit((p) => {
           const f = findFurniture(p, id);
           if (!f) return;
@@ -613,6 +635,12 @@ export const useEditorStore = create<EditorState>()(
           if (assembly) assembly.parts = result.parts;
           // Модель хранится в изделии, поэтому переживает сохранение (§90).
           f.params = { ...(f.params ?? {}), [PARAMETRIC_KEY]: model } as Record<string, unknown>;
+
+          const ownPartIds = new Set(result.parts.map((x) => String(x.id)));
+          const foreign = p.hardwareConnections.filter(
+            (c) => !ownPartIds.has(String(c.partAId)) && !ownPartIds.has(String(c.partBId)),
+          );
+          p.hardwareConnections = [...foreign, ...reconciled.connections];
         });
 
         return {
@@ -655,12 +683,61 @@ export const useEditorStore = create<EditorState>()(
         const furniture = createFurniture(name ?? template.name);
         furniture.type = 'cabinet';
         const result = generateParts(model, []);
+        // Соединения создаются сразу вместе с деталями (§27).
+        const reconciled = reconcileConnections(project, result.parts, {
+          jointCategory: model.jointType,
+          construction: model.construction,
+          handles: model.doors.handleEnabled,
+        });
         commit((p) => {
           furniture.params = { [PARAMETRIC_KEY]: model } as Record<string, unknown>;
           if (furniture.assemblies[0]) furniture.assemblies[0].parts = result.parts;
           p.furnitures.push(furniture);
+          p.hardwareConnections = [...p.hardwareConnections, ...reconciled.connections];
         });
         return furniture.id;
+      },
+
+
+      // ── Соединения ────────────────────────────────────────────────────────
+      /* Пересборка соединений по правилам (§27/§47). Ручные соединения
+       * переживают пересчёт, соединения исчезнувших деталей удаляются. */
+      regenerateConnections: (id) => {
+        const project = get().project;
+        const furniture = findFurniture(project, id);
+        if (!furniture) return { ok: false, added: 0, removed: 0, manual: 0, orphaned: 0 };
+
+        const model = readParametricModel(furniture);
+        const parts = furniture.assemblies[0]?.parts ?? [];
+        const result = reconcileConnections(project, parts, {
+          jointCategory: model.jointType,
+          construction: model.construction,
+          handles: model.doors.handleEnabled,
+        });
+
+        commit((p) => {
+          // Соединения деталей ДРУГИХ изделий не трогаем.
+          const ownPartIds = new Set(parts.map((x) => String(x.id)));
+          const foreign = p.hardwareConnections.filter(
+            (c) => !ownPartIds.has(String(c.partAId)) && !ownPartIds.has(String(c.partBId)),
+          );
+          p.hardwareConnections = [...foreign, ...result.connections];
+        });
+
+        return {
+          ok: true,
+          added: result.added.length,
+          removed: result.removed.length,
+          manual: result.manual.length,
+          orphaned: result.orphaned.length,
+        };
+      },
+
+      pruneConnections: () => {
+        const { connections, removed } = pruneDeadConnections(get().project);
+        if (removed.length === 0) return 0;
+        commit((p) => void (p.hardwareConnections = connections));
+        return removed.length;
       },
 
       setPartOverride: (partId, patch) =>
@@ -700,7 +777,10 @@ export const useEditorStore = create<EditorState>()(
         const binding: TemplateBinding = { templateId, generator: template.generator, values: vals };
         furniture.metadata = { ...(furniture.metadata ?? {}), template: binding };
 
-        // Резолвим фурнитуру по категориям и планируем соединения.
+        /* Соединения шаблонного изделия строит тот же движок правил, что и у
+         * параметрических (§1/§27): вторая система соединений не заводится,
+         * поэтому у них есть stableId, статус и источник. */
+        const ctx = cabinetConnectionContext(params);
         const newHardware: Hardware[] = [];
         const resolveHardware = (category: HardwareCategory): HardwareId | null => {
           const existing = project.hardware.find((h) => h.category === category)
@@ -712,34 +792,21 @@ export const useEditorStore = create<EditorState>()(
           newHardware.push(hw);
           return hw.id;
         };
-        const keyToPart = new Map<string, PartId>();
-        for (const part of built.parts) {
-          const k = part.metadata?.key as string | undefined;
-          if (k) keyToPart.set(k, part.id);
+        // Крепёж нужных категорий должен существовать до пересборки —
+        // иначе движок пропустит соединение (нет фурнитуры — нет узла).
+        for (const plan of planConnections({ ...ctx, parts: built.parts })) {
+          resolveHardware(plan.category);
         }
-        const connections: HardwareConnection[] = [];
-        for (const plan of planCabinetConnections(built.parts, params)) {
-          const hwId = resolveHardware(plan.category);
-          const aId = keyToPart.get(plan.aKey);
-          const bId = keyToPart.get(plan.bKey);
-          if (!hwId || !aId || !bId) continue;
-          const a = built.parts.find((x) => x.id === aId)!;
-          const b = built.parts.find((x) => x.id === bId)!;
-          connections.push({
-            id: newHardwareConnectionId(),
-            hardwareId: hwId,
-            partAId: aId,
-            partBId: bId,
-            jointType: inferJointType(a, b),
-            quantity: plan.quantity,
-            parameters: { gen: 'template' },
-          });
-        }
+        const reconciled = reconcileConnections(
+          { ...project, hardware: [...project.hardware, ...newHardware] },
+          built.parts,
+          ctx,
+        );
 
         commit((p) => {
           for (const hw of newHardware) p.hardware.push(hw);
           p.furnitures.push(furniture);
-          for (const c of connections) p.hardwareConnections.push(c);
+          p.hardwareConnections = [...p.hardwareConnections, ...reconciled.connections];
         });
         set((s) => void (s.activeFurnitureId = furniture.id));
         return { ok: true, id: furniture.id };
@@ -766,17 +833,11 @@ export const useEditorStore = create<EditorState>()(
           furniture.metadata = { ...furniture.metadata, template: { ...binding, values: merged } };
 
           // Пересобрать соединения, порождённые шаблоном (ручные — сохранить).
-          const partIds = new Set(built.parts.map((x) => x.id));
-          p.hardwareConnections = p.hardwareConnections.filter((c) => {
-            const isTemplateGen = (c.parameters as Record<string, unknown> | undefined)?.gen === 'template';
-            const belongs = partIds.has(c.partAId) || partIds.has(c.partBId);
-            return !(isTemplateGen && belongs);
-          });
-          const keyToPart = new Map<string, PartId>();
-          for (const part of built.parts) {
-            const k = part.metadata?.key as string | undefined;
-            if (k) keyToPart.set(k, part.id);
-          }
+          /* Соединения пересобираются тем же движком правил, в ТОМ ЖЕ commit,
+           * что и детали (§47): stableId сохраняет id узлов, поэтому ручные
+           * правки присадки переживают смену параметров, а узлы исчезнувших
+           * деталей уходят вместе с ними (§49/§50). */
+          const ctx = cabinetConnectionContext(params);
           const resolveHardware = (category: HardwareCategory): HardwareId | null => {
             const existingHw = p.hardware.find((h) => h.category === category);
             if (existingHw) return existingHw.id;
@@ -786,20 +847,16 @@ export const useEditorStore = create<EditorState>()(
             p.hardware.push(hw);
             return hw.id;
           };
-          for (const plan of planCabinetConnections(built.parts, params)) {
-            const hwId = resolveHardware(plan.category);
-            const aId = keyToPart.get(plan.aKey);
-            const bId = keyToPart.get(plan.bKey);
-            if (!hwId || !aId || !bId) continue;
-            const a = built.parts.find((x) => x.id === aId)!;
-            const b = built.parts.find((x) => x.id === bId)!;
-            p.hardwareConnections.push({
-              id: newHardwareConnectionId(),
-              hardwareId: hwId, partAId: aId, partBId: bId,
-              jointType: inferJointType(a, b), quantity: plan.quantity,
-              parameters: { gen: 'template' },
-            });
+          for (const plan of planConnections({ ...ctx, parts: built.parts })) {
+            resolveHardware(plan.category);
           }
+          const reconciled = reconcileConnections(p, built.parts, ctx);
+          // Соединения деталей ДРУГИХ изделий не трогаем.
+          const ownPartIds = new Set(built.parts.map((x) => String(x.id)));
+          const foreign = p.hardwareConnections.filter(
+            (c) => !ownPartIds.has(String(c.partAId)) && !ownPartIds.has(String(c.partBId)),
+          );
+          p.hardwareConnections = [...foreign, ...reconciled.connections];
         }),
 
       detachTemplate: (id) =>
