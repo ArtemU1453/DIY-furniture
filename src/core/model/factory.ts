@@ -74,6 +74,11 @@ export const DEFAULT_CUTTING_SETTINGS: CuttingSettings = {
   sheetSelection: {},
   sheetPriority: {},
   preferFewerSheets: true,
+  minGap: 0,
+  bladeWidth: undefined,
+  presets: [],
+  qualityThresholds: { excellent: 85, good: 75, average: 60 },
+  lockedPlans: {},
 };
 
 /** Полные настройки раскроя со значениями по умолчанию (для миграции). */
@@ -86,6 +91,9 @@ export function makeCuttingSettings(): CuttingSettings {
     sheetSelection: {},
     sheetPriority: {},
     locked: [],
+    presets: [],
+    qualityThresholds: { ...DEFAULT_CUTTING_SETTINGS.qualityThresholds! },
+    lockedPlans: {},
   };
 }
 

@@ -27,13 +27,34 @@ export function runCutting(
   /* Результат помечается алгоритмом, его версией и снимком настроек (§56–§59):
    * по сохранённому раскрою видно, чем и с какими параметрами он посчитан,
    * поэтому его можно воспроизвести даже после смены настроек проекта. */
-  const stamp = (result: CuttingResult, input: typeof inputs[number]): CuttingResult => ({
-    ...result,
-    jobId: jobId(String(project.id), String(input.materialId), thicknessOf.get(String(input.materialId)) ?? 0),
-    algorithm: engine.id,
-    algorithmVersion: engine.version,
-    settingsSnapshot: snapshotOf(input, engine.id, engine.version),
-  });
+  const stamp = (result: CuttingResult, input: typeof inputs[number]): CuttingResult => {
+    /* §24: размещение знает свой лист независимо от того, какой движок его
+     * посчитал — экспорт и таблица раскроя опираются на sheetId. Копия, а не
+     * правка на месте: результат мог прийти из кэша или из состояния проекта
+     * и быть заморожен. */
+    const grainOf = new Map(input.pieces.map((p) => [p.pieceId, p.grain]));
+    const sheets = result.sheets.map((sheet) =>
+      sheet.placements.every((p) => p.sheetId === sheet.id && p.grainDirection != null)
+        ? sheet
+        : {
+            ...sheet,
+            placements: sheet.placements.map((p) => ({
+              ...p,
+              sheetId: sheet.id,
+              // §24/§35: ориентация текстуры детали видна прямо в размещении.
+              grainDirection: p.grainDirection ?? grainOf.get(p.pieceId) ?? 'none',
+            })),
+          },
+    );
+    return {
+      ...result,
+      sheets,
+      jobId: jobId(String(project.id), String(input.materialId), thicknessOf.get(String(input.materialId)) ?? 0),
+      algorithm: engine.id,
+      algorithmVersion: engine.version,
+      settingsSnapshot: snapshotOf(input, engine.id, engine.version),
+    };
+  };
 
   const jobs = inputs.map((input, i) => {
     // Кэш: одинаковый вход + алгоритм → прежний результат без пересчёта (§45).
