@@ -3,6 +3,7 @@
  * нарастающим отступом, чтобы не пересекать её хаотично (базовое авто-размещение).
  */
 import type { Prim } from './scene';
+import { fmtMm } from './notation';
 
 export type DimensionType = 'HORIZONTAL' | 'VERTICAL' | 'ALIGNED' | 'RADIAL' | 'ANGULAR';
 
@@ -21,8 +22,12 @@ const DIM_COLOR = '#8aa0c0';
 const ARROW = 6;
 const TICK = 4;
 
+/**
+ * Значение размера на чертеже — в мм, без лишнего округления (§33):
+ * 16, 800, 153.5. Формат единый с остальной документацией.
+ */
 function fmt(v: number): string {
-  return String(Math.round(v));
+  return fmtMm(v);
 }
 
 /** Развернуть размер в примитивы (выносные + размерная линия + стрелки + текст). */
@@ -80,4 +85,70 @@ export function hDim(x1: number, x2: number, yBase: number, offset: number): Dim
 /** Вертикальный размер слева от геометрии. */
 export function vDim(y1: number, y2: number, xBase: number, offset: number): Dimension {
   return { type: 'VERTICAL', x1: xBase, y1, x2: xBase, y2, value: Math.abs(y2 - y1), offset };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Авто-раскладка размеров (§35)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Прямоугольник, занимаемый размерной линией вместе с текстом (мм). */
+export function dimensionBox(d: Dimension): { x1: number; y1: number; x2: number; y2: number } {
+  const TEXT = 6; // высота подписи + зазор
+  if (d.type === 'HORIZONTAL') {
+    const y = Math.max(d.y1, d.y2) + d.offset;
+    return { x1: Math.min(d.x1, d.x2), y1: y - TEXT, x2: Math.max(d.x1, d.x2), y2: y + TICK };
+  }
+  if (d.type === 'VERTICAL') {
+    const x = Math.min(d.x1, d.x2) - d.offset;
+    return { x1: x - TEXT, y1: Math.min(d.y1, d.y2), x2: x + TICK, y2: Math.max(d.y1, d.y2) };
+  }
+  const dx = d.x2 - d.x1, dy = d.y2 - d.y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const ox = (-dy / len) * d.offset, oy = (dx / len) * d.offset;
+  return {
+    x1: Math.min(d.x1, d.x2) + Math.min(ox, 0) - TEXT,
+    y1: Math.min(d.y1, d.y2) + Math.min(oy, 0) - TEXT,
+    x2: Math.max(d.x1, d.x2) + Math.max(ox, 0) + TEXT,
+    y2: Math.max(d.y1, d.y2) + Math.max(oy, 0) + TEXT,
+  };
+}
+
+function boxesOverlap(
+  a: { x1: number; y1: number; x2: number; y2: number },
+  b: { x1: number; y1: number; x2: number; y2: number },
+): boolean {
+  return a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
+}
+
+/**
+ * Развести размеры так, чтобы их линии и подписи не накладывались друг на
+ * друга: каждый следующий конфликтующий размер отодвигается на шаг наружу.
+ * Это базовая раскладка, а не полноценный CAD-layout — но пересечений после
+ * неё не остаётся.
+ */
+export function layoutDimensions(dims: Dimension[], step = 9, maxTries = 24): Dimension[] {
+  const placed: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+  const out: Dimension[] = [];
+  for (const d of dims) {
+    let cur = d;
+    let box = dimensionBox(cur);
+    for (let i = 0; i < maxTries && placed.some((p) => boxesOverlap(p, box)); i++) {
+      cur = { ...cur, offset: cur.offset + step };
+      box = dimensionBox(cur);
+    }
+    placed.push(box);
+    out.push(cur);
+  }
+  return out;
+}
+
+/** Пересекаются ли размеры при текущих выносах (для проверок и тестов). */
+export function dimensionsOverlap(dims: Dimension[]): boolean {
+  const boxes = dims.map(dimensionBox);
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      if (boxesOverlap(boxes[i], boxes[j])) return true;
+    }
+  }
+  return false;
 }

@@ -18,7 +18,11 @@ import { buildPartsListDocument } from './partsList';
 import { buildHardwareListDocument } from './hardwareList';
 import { buildProjectSummaryDocument } from './summary';
 import { buildProductionReport } from './report';
-import type { DocumentType, DrawingDocument } from './sheet';
+import { buildTitlePageDocument } from './titlePage';
+import { buildGeneralViewDocument } from './generalView';
+import { buildMaterialListDocument } from './materialList';
+import { buildMachiningListDocument } from './machiningList';
+import type { DocumentType, DrawingDocument, ScaleValue, SheetFormat, ViewName } from './sheet';
 
 export type DocumentStatus = 'CURRENT' | 'OUTDATED' | 'GENERATING' | 'ERROR';
 
@@ -29,21 +33,53 @@ export interface DocumentDescriptor {
 }
 
 /**
- * Порядок документов в комплекте (§25): титульная/итоговая → сборочный →
- * спецификации → чертежи деталей → присадка → карта раскроя. specification и
- * report сохранены для обратной совместимости.
+ * Структура Document Center (§62) и порядок страниц в PDF (§29):
+ * титульная → общий вид → сборочный → спецификация → детали → раскрой →
+ * присадка → фурнитура → материалы → итог. Документы прошлых этапов
+ * (machining/specification/report) сохранены, чтобы не ломать существующие
+ * ссылки и сохранённые проекты.
  */
 export const DOCUMENT_LIST: DocumentDescriptor[] = [
-  { key: 'summary', type: 'PROJECT_SUMMARY', title: 'Итоговая информация' },
+  { key: 'title', type: 'TITLE_PAGE', title: 'Титульный лист' },
+  { key: 'generalView', type: 'GENERAL_VIEW', title: 'Общий вид' },
   { key: 'assembly', type: 'ASSEMBLY_DRAWING', title: 'Сборочный чертёж' },
   { key: 'partsList', type: 'PARTS_LIST', title: 'Спецификация деталей' },
-  { key: 'hardwareList', type: 'HARDWARE_LIST', title: 'Спецификация фурнитуры' },
   { key: 'parts', type: 'PART_DRAWING', title: 'Чертежи деталей' },
-  { key: 'machining', type: 'MACHINING_DRAWING', title: 'Присадка' },
-  { key: 'cutting', type: 'CUTTING_DRAWING', title: 'Карта раскроя' },
+  { key: 'cutting', type: 'CUTTING_LAYOUT', title: 'Карта раскроя' },
+  { key: 'machiningList', type: 'MACHINING_LIST', title: 'Ведомость присадки' },
+  { key: 'hardwareList', type: 'HARDWARE_LIST', title: 'Спецификация фурнитуры' },
+  { key: 'materialList', type: 'MATERIAL_LIST', title: 'Ведомость материалов' },
+  { key: 'summary', type: 'PROJECT_SUMMARY', title: 'Итоговая информация' },
+  // Документы предыдущих этапов — доступны, но не входят в основную структуру.
+  { key: 'machining', type: 'MACHINING_DRAWING', title: 'Присадка (чертежи)' },
   { key: 'specification', type: 'SPECIFICATION', title: 'Спецификация (сводная)' },
   { key: 'report', type: 'PRODUCTION_REPORT', title: 'Производственный отчёт' },
 ];
+
+/**
+ * Настройки, влияющие на построение документа (§6). Приходят из
+ * project.documents.settings — оформление, а не производственная модель.
+ */
+export interface DocumentSettings {
+  views?: ViewName[];
+  scale?: ScaleValue;
+  format?: SheetFormat;
+  partFilter?: string;
+  revision?: string;
+}
+
+/** Достать настройки документа из проекта (оформление, не модель). */
+export function documentSettings(project: Project, key: string): DocumentSettings {
+  const s = project.documents.settings;
+  const scale = s?.scaleOverrides?.[key];
+  return {
+    views: s?.views as ViewName[] | undefined,
+    scale: scale === undefined ? undefined : scale,
+    format: s?.formatOverrides?.[key],
+    partFilter: s?.partFilter,
+    revision: project.documents.docVersion ? `Rev. ${project.documents.docVersion}` : undefined,
+  };
+}
 
 /** Присадка как отдельный документ: страницы только деталей с операциями. */
 function buildMachiningDocument(project: Project): DrawingDocument {
@@ -56,14 +92,21 @@ function buildMachiningDocument(project: Project): DrawingDocument {
   return { id: `doc-machining-${project.id}`, type: 'MACHINING_DRAWING', projectId: project.id, title: 'Присадка', pages };
 }
 
-/** Построить документ по ключу. */
+/** Построить документ по ключу с учётом настроек оформления. */
 export function buildDocument(project: Project, key: string): DrawingDocument {
+  const settings = documentSettings(project, key);
   switch (key) {
+    case 'title': return buildTitlePageDocument(project);
+    case 'generalView': return buildGeneralViewDocument(project, {
+      views: settings.views, scale: settings.scale, format: settings.format, revision: settings.revision,
+    });
     case 'summary': return buildProjectSummaryDocument(project);
     case 'assembly': return buildAssemblyDocument(project);
     case 'partsList': return buildPartsListDocument(project);
     case 'hardwareList': return buildHardwareListDocument(project);
-    case 'parts': return buildPartsDocument(project);
+    case 'materialList': return buildMaterialListDocument(project);
+    case 'machiningList': return buildMachiningListDocument(project);
+    case 'parts': return buildPartsDocument(project, { filter: settings.partFilter, revision: settings.revision });
     case 'machining': return buildMachiningDocument(project);
     case 'cutting': return buildCuttingDocument(project);
     case 'specification': return buildSpecificationDocument(project);

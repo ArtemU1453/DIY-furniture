@@ -194,7 +194,13 @@ export function App() {
           {centerView === 'hardware' && <HardwareView />}
           {centerView === 'machining' && <MachiningView />}
           {centerView === 'cutting' && <CuttingView onOpenDrawing={(partId) => { selectPart(partId); setCenterView('documents'); }} />}
-          {centerView === 'documents' && <DocumentsView />}
+          {centerView === 'documents' && (
+            <DocumentsView
+              onOpenIn3D={() => setCenterView('3d')}
+              onOpenInCutting={() => setCenterView('cutting')}
+              onOpenInMachining={() => setCenterView('machining')}
+            />
+          )}
         </div>
       </div>
       <RightPanel />
