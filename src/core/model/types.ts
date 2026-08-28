@@ -530,6 +530,13 @@ export interface Hardware {
    * работать без изменений.
    */
   machiningRules?: HardwareRule[];
+  /**
+   * Правило размещения по умолчанию (§10/§79). Пресет и правило соединения
+   * могут его переопределить; отсутствие поля означает «по центру узла».
+   */
+  placement?: PlacementRule;
+  /** Правило массива по умолчанию (§83–§85): полкодержатели, петли, шканты. */
+  array?: HardwareArraySpec;
   archived?: boolean;
   schemaVersion?: number;
   libraryRef?: LibraryRef;
@@ -576,12 +583,79 @@ export interface HardwareInstance {
   /** Стабильный id: `<connectionId>#<индекс>`. */
   id: string;
   hardwareId: HardwareId;
-  connectionId: HardwareConnectionId;
+  /**
+   * Соединение, породившее единицу. Пусто у ручной фурнитуры (§132):
+   * декоративная ручка может стоять и без конструктивного узла.
+   */
+  connectionId?: HardwareConnectionId;
   /** Деталь, на которой стоит единица (сторона A соединения). */
   partId: PartId;
   /** Вторая деталь узла — для навигации и подсветки. */
   counterpartId?: PartId;
   position?: Vec3;
+  /** Ориентация единицы, градусы (§61). */
+  rotation?: Rotation;
+  /** Значения параметров именно этой единицы (§4): длина, вылет, отступ. */
+  parameters?: Record<string, number | string | boolean>;
+  /** Количество единиц в этой позиции (§4). Отсутствует — одна штука. */
+  quantity?: number;
+  /** Порождена правилом или поставлена вручную (§132). */
+  source?: 'rule' | 'manual';
+}
+
+/**
+ * Опорная точка параметрического положения фурнитуры (§17/§79).
+ *
+ * EDGE      — от края детали;
+ * CENTER    — от центра детали;
+ * CORNER    — от угла (обе координаты от края);
+ * DISTANCE  — фиксированное расстояние в мм;
+ * PARAMETER — из параметра модуля или выражения.
+ */
+export type PlacementReference = 'EDGE' | 'CENTER' | 'CORNER' | 'DISTANCE' | 'PARAMETER';
+
+/**
+ * Правило параметрического размещения (§16/§79–§81).
+ *
+ * Координата задаётся либо числом, либо ВЫРАЖЕНИЕМ, которое считает
+ * существующий безопасный вычислитель (§108). Никакого произвольного
+ * JavaScript: `width / 2` — это формула, а не код.
+ */
+export interface PlacementRule {
+  reference: PlacementReference;
+  /** Выражение или число для координаты вдоль детали. */
+  x?: string | number;
+  /** Выражение или число для координаты поперёк детали. */
+  y?: string | number;
+  /** Сторона отсчёта для EDGE/CORNER. */
+  from?: 'left' | 'right' | 'top' | 'bottom';
+  /** Отступ от опорной точки, мм. */
+  offset?: Mm;
+}
+
+/** Способ расстановки элементов массива (§87). */
+export type SpacingMode = 'FIXED' | 'EQUAL' | 'MAX';
+
+/**
+ * Массив фурнитуры (§83–§89): повторение позиции по линии.
+ *
+ * Количество может задаваться прямо или вычисляться правилом по длине
+ * соединения (§33/§85) с ограничениями minCount/maxCount (§34).
+ */
+export interface HardwareArraySpec {
+  /** Явное количество; не задано — считается по spacing и длине. */
+  count?: number;
+  /** Шаг между элементами, мм (§32/§84). */
+  spacing?: Mm;
+  spacingMode?: SpacingMode;
+  /** Направление размещения на детали. */
+  direction?: 'horizontal' | 'vertical';
+  /** Отступ первого и последнего элемента от края, мм (§88). */
+  edgeOffset?: Mm;
+  minCount?: number;
+  maxCount?: number;
+  /** Симметрично относительно центра (§90/§91). */
+  symmetric?: boolean;
 }
 
 /**
@@ -699,15 +773,48 @@ export interface HardwareConnection {
    * например верхний и нижний узел боковины с перегородкой.
    */
   position?: string;
+  /** Параметры узла: шаг шкантов, отступ от края и т.п. (§13/§16). */
   parameters?: Record<string, number | string | boolean>;
+  /**
+   * Правка автоматически рассчитанного количества (§134/§135). Пусто —
+   * количество считается правилом; сброс override (§136) — удаление поля.
+   */
+  quantityOverride?: number;
+  /**
+   * Снимок правила, которым узел построен (§99/§100): версия правила и
+   * параметры на момент расчёта. По нему видно, что узел устарел (§24).
+   */
+  ruleSnapshot?: ConnectionRuleSnapshot;
+  /** Правило размещения крепежа в узле (§16/§17). */
+  placement?: PlacementRule;
+  /** Массив точек крепления для длинного узла (§86). */
+  array?: HardwareArraySpec;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Снимок правила соединения (§99/§100). Хранится вместе с узлом, поэтому
+ * после доработки правил видно, каким поколением построен существующий узел.
+ */
+export interface ConnectionRuleSnapshot {
+  ruleId: string;
+  version: string;
+  /** Параметры крепежа на момент расчёта. */
+  hardwareParameters?: Record<string, number | string | boolean>;
+  /** Параметры узла на момент расчёта. */
+  connectionParameters?: Record<string, number | string | boolean>;
+  createdAt: string; // ISO
 }
 
 /** Источник соединения (§4). */
 export type ConnectionSource = 'PARAMETRIC' | 'MANUAL';
 
-/** Состояние соединения после проверки (§45). */
-export type ConnectionStatus = 'VALID' | 'WARNING' | 'ERROR' | 'OUTDATED';
+/**
+ * Состояние соединения после проверки (§24/§45).
+ * DIRTY — исходные детали изменились, узел требует пересчёта (§96);
+ * OUTDATED — узел построен другой версией правила (§99).
+ */
+export type ConnectionStatus = 'VALID' | 'WARNING' | 'ERROR' | 'DIRTY' | 'OUTDATED';
 
 /** Состояние присадки относительно модели (§46). */
 export type MachiningStatus = 'CURRENT' | 'DIRTY' | 'ERROR';
@@ -763,6 +870,12 @@ export interface Part {
 
   position: Vec3;
   rotation: Rotation;
+  /**
+   * Смещение детали в разнесённом виде (§145). Это ПРЕДСТАВЛЕНИЕ, а не
+   * конструкция: на раскрой, присадку и спецификацию оно не влияет и в
+   * производственных расчётах не участвует.
+   */
+  explodedOffset?: Vec3;
 
   machining: MachiningOperation[];
   parentId?: PartId;
@@ -1378,6 +1491,12 @@ export interface Project {
   edges: EdgeMaterial[];
   hardware: Hardware[];
   hardwareConnections: HardwareConnection[];
+  /**
+   * Единицы фурнитуры, поставленные вручную (§132): декоративная ручка может
+   * стоять без конструктивного узла. Единицы, порождённые соединениями,
+   * здесь НЕ хранятся — они выводятся из связей (§20/§85).
+   */
+  hardwareInstances?: HardwareInstance[];
   /** Комплекты фурнитуры (§23). Необязательно — старые проекты открываются (§108). */
   hardwareKits?: HardwareKit[];
   /** Пресеты фурнитуры проекта (§64/§107). */

@@ -18,6 +18,7 @@ import { LibraryView } from '@/components/panels/LibraryView';
 import { ProductionView } from '@/components/panels/ProductionView';
 import { ModulesView } from '@/components/panels/ModulesView';
 import { Editor2DView } from '@/components/panels/Editor2DView';
+import { ConnectionsView } from '@/components/panels/ConnectionsView';
 import { ParametricPanel } from '@/components/panels/ParametricPanel';
 import { Scene3D, type CameraApi } from '@/features/designer/Scene3D';
 import { ModelTree } from '@/components/panels/ModelTree';
@@ -29,7 +30,7 @@ import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { saveCurrentProject } from '@/features/project/projectActions';
 
-type CenterView = '3d' | 'editor2d' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'modules';
+type CenterView = '3d' | 'editor2d' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'modules';
 type ViewMode = '3d' | '2d' | 'split';
 
 export function App() {
@@ -38,6 +39,8 @@ export function App() {
   const [centerView, setCenterView] = useState<CenterView>('3d');
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
   const [showNumbers, setShowNumbers] = useState(false);
+  const assembly = useEditorStore((s) => s.assembly);
+  const setAssemblyMode = useEditorStore((s) => s.setAssemblyMode);
   const [bodyMode, setBodyMode] = useState<'construction' | 'body'>('construction');
   const [showTree, setShowTree] = useState(true);
   const captureRef = useRef<{ capture: () => string } | null>(null);
@@ -122,6 +125,7 @@ export function App() {
               ['table', 'Детали'],
               ['materials', 'Материалы'],
               ['hardware', 'Фурнитура'],
+              ['connections', 'Соединения'],
               ['machining', 'Присадка'],
               ['cutting', 'Раскрой'],
               ['modules', 'Модули'],
@@ -151,6 +155,23 @@ export function App() {
                 <input type="checkbox" checked={showTree} onChange={(e) => setShowTree(e.target.checked)} />
                 Дерево модели
               </label>
+              <span className="sep" style={{ margin: '0 6px' }} />
+              {/* §146–§148: сборка и разнесённый вид — режимы просмотра. */}
+              {(['ASSEMBLY', 'EXPLODED'] as const).map((m) => (
+                <button key={m} data-assembly={m} className={assembly.mode === m ? 'active' : ''}
+                  onClick={() => setAssemblyMode(m)}>
+                  {m === 'ASSEMBLY' ? 'Сборка' : 'Разнести'}
+                </button>
+              ))}
+              {assembly.mode === 'EXPLODED' && (
+                <input
+                  data-testid="explode-factor"
+                  type="range" min={0} max={1} step={0.1} value={assembly.factor}
+                  onChange={(e) => setAssemblyMode('EXPLODED', Number(e.target.value))}
+                  style={{ width: 90, marginLeft: 6 }}
+                  title="Насколько разнести детали"
+                />
+              )}
               <span className="sep" style={{ margin: '0 6px' }} />
               {(['construction', 'body'] as const).map((m) => (
                 <button key={m} className={bodyMode === m ? 'active' : ''} onClick={() => setBodyMode(m)}>
@@ -201,6 +222,9 @@ export function App() {
           )}
           {centerView === 'editor2d' && (
             <Editor2DView onOpenPart={(id) => { selectPart(id); setCenterView('table'); }} />
+          )}
+          {centerView === 'connections' && (
+            <ConnectionsView onOpenPart={(id) => { selectPart(id); setCenterView('table'); }} />
           )}
           {centerView === 'table' && <PartsTable />}
           {centerView === 'materials' && <MaterialsView />}

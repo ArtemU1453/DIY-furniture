@@ -9,6 +9,7 @@ import { partWorldAABB, partBoxGeometry } from '@/core/geometry/partGeometry';
 import { operationWorld } from '@/core/geometry/coordinateSystem';
 import { allOperations } from '@/engines/machining';
 import { overallDimensions, detectCollisions, validatePartChange } from '@/engines/viewer';
+import { displayPosition, offsetForPart, projectExploded } from '@/engines/hardware';
 import type { MachiningId, MaterialId, PartId } from '@/core/model/ids';
 import type { HardwareCategory, Material, Part, Project } from '@/core/model/types';
 import { PartMesh } from './PartMesh';
@@ -316,6 +317,23 @@ export function Scene3D({
     () => (viewer.isolatedPartId ? allVisible.filter((p) => p.id === viewer.isolatedPartId) : allVisible),
     [allVisible, viewer.isolatedPartId],
   );
+  const assembly = useEditorStore((s) => s.assembly);
+
+  /* §146–§148: разнесённый вид — это ПРЕДСТАВЛЕНИЕ. Смещение считается на
+   * лету и подмешивается в копию детали для отрисовки; ProjectModel и все
+   * производственные расчёты остаются нетронутыми. */
+  const explodeOffsets = useMemo(
+    () => (assembly.mode === 'EXPLODED' ? projectExploded(project, { factor: assembly.factor }) : []),
+    [project, assembly.mode, assembly.factor],
+  );
+  const displayParts = useMemo(() => {
+    if (assembly.mode !== 'EXPLODED') return parts;
+    return parts.map((part) => {
+      const offset = offsetForPart(explodeOffsets, String(part.id), 'EXPLODED');
+      return { ...part, position: displayPosition(part, offset) };
+    });
+  }, [parts, explodeOffsets, assembly.mode]);
+
   const collisions = useMemo(() => detectCollisions(allVisible), [allVisible]);
   const selectedPart = selectedPartId ? findPart(project, selectedPartId) : undefined;
   const movable = viewer.tool === 'move' && selectedPart && selectedPart.metadata?.locked !== true;
@@ -386,7 +404,7 @@ export function Scene3D({
           <meshBasicMaterial />
         </mesh>
 
-        {parts.map((part) => (
+        {displayParts.map((part) => (
           <PartMesh
             key={part.id}
             part={part}
