@@ -202,6 +202,7 @@ import {
   reconcileConnections,
 } from '@/engines/connections';
 import { validatePartChange } from '@/engines/viewer';
+import { constructionMounts, constructionOf } from '@/core/parametric/types';
 import {
   buildUpdatePatches,
   linkProfile,
@@ -1619,9 +1620,15 @@ export const useEditorStore = create<EditorState>()(
         if (patch.depth != null) next.depth = patch.depth;
         if (patch.thickness != null) next.thickness = patch.thickness;
         if (patch.material !== undefined) next.materialId = patch.material;
-        // 'overlay' — крышка поверх боковин, это ON_SIDES параметрической модели.
-        if (patch.top === 'overlay') next.construction = 'ON_SIDES';
-        else if (patch.top === 'between') next.construction = 'BETWEEN_SIDES';
+        /* Верх и низ независимы: меняем только ту половину схемы, которую
+         * задал пользователь, вторая остаётся прежней (этап 37). */
+        if (patch.top !== undefined || patch.bottom !== undefined) {
+          const mounts = constructionMounts(model.construction);
+          next.construction = constructionOf({
+            topOnSides: patch.top !== undefined ? patch.top === 'overlay' : mounts.topOnSides,
+            bottomUnder: patch.bottom !== undefined ? patch.bottom === 'under' : mounts.bottomUnder,
+          });
+        }
         if (patch.shelves != null) next.shelves = { ...model.shelves, count: patch.shelves };
         if (patch.doors != null) next.doors = { ...model.doors, count: patch.doors };
         if (patch.dividers != null) {
@@ -1664,6 +1671,19 @@ export const useEditorStore = create<EditorState>()(
           };
         }
         const diff = diffParametric(before, model, existing);
+
+        /* Пустой пересчёт не должен занимать шаг отмены (этап 37).
+         * Панель параметров подтверждает поле при потере фокуса, поэтому клик
+         * по «Отменить» сначала присылал ТО ЖЕ значение: запись без изменений
+         * съедала первое нажатие, и отмена «не работала». */
+        const unchanged = result.added === 0 && result.removed === 0 && result.changed === 0
+          && JSON.stringify(before) === JSON.stringify(model);
+        if (unchanged) {
+          return {
+            ok: true, diff, added: 0, removed: 0, changed: 0,
+            errors: [], description: 'Без изменений',
+          };
+        }
 
         /* Соединения записываются в ТОМ ЖЕ commit, что и детали (§47):
          * иначе undo откатил бы детали, оставив соединения от новой

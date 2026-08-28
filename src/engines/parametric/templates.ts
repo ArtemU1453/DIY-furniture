@@ -9,6 +9,7 @@
 import type { Furniture } from '@/core/model/types';
 import type { MaterialId } from '@/core/model/ids';
 import {
+  constructionOf,
   createParametricModel,
   DEFAULT_LIMITS,
   PARAMETRIC_KEY,
@@ -113,7 +114,13 @@ const BACK_TYPE_MAP: Record<string, ParametricModel['backPanel']['type']> = {
  */
 export function fromCabinetParameters(params: Partial<CabinetParameters>): ParametricModel {
   const thickness = params.thickness ?? 16;
-  const construction = params.top === 'overlay' ? 'ON_SIDES' : 'BETWEEN_SIDES';
+  /* Верх и низ в проектах прошлых этапов настраивались НЕЗАВИСИМО, поэтому
+   * читаются оба: смешанная схема сохраняется как есть и геометрия старого
+   * проекта не меняется при открытии (этап 37). */
+  const construction = constructionOf({
+    topOnSides: params.top === 'overlay',
+    bottomUnder: params.bottom === 'under',
+  });
   const boardOnly = params.boardOnly === true;
   return createParametricModel({
     kind: boardOnly ? 'BOARD' : 'CABINET',

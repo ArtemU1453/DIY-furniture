@@ -12,7 +12,8 @@ import {
   runCommand,
   setParameter,
   validateParametricModel,
-  type CabinetConstructionType,
+  CONSTRUCTION_LABELS,
+  CONSTRUCTION_ORDER,
   type ParametricModel,
   type ShelfDistribution,
 } from '@/engines/parametric';
@@ -20,11 +21,6 @@ import { isCuttingStale } from '@/engines/cutting';
 import { isDocumentsOutdated } from '@/engines/drawing';
 import { allParts, findPart } from '@/core/model/selectors';
 import type { FurnitureId, PartId } from '@/core/model/ids';
-
-const CONSTRUCTIONS: Array<[CabinetConstructionType, string]> = [
-  ['BETWEEN_SIDES', 'Верх и низ между боковинами'],
-  ['ON_SIDES', 'Верх и низ на боковинах'],
-];
 
 const DISTRIBUTIONS: Array<[ShelfDistribution, string]> = [
   ['AUTO_EQUAL', 'Равномерно'],
@@ -215,7 +211,9 @@ export function ParametricPanel() {
             <span className="dim">Схема корпуса</span>
             <select value={model.construction}
               onChange={(e) => command('SetConstruction', { construction: e.target.value })}>
-              {CONSTRUCTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              {CONSTRUCTION_ORDER.map((v) => (
+                <option key={v} value={v}>{CONSTRUCTION_LABELS[v]}</option>
+              ))}
             </select>
           </label>
         </section>

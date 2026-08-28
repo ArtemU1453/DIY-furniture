@@ -5,7 +5,12 @@
  * Детали НЕ хранятся здесь: они порождаются движком из этих параметров.
  */
 import type { MaterialId } from '@/core/model/ids';
-import { createParametricModel, PARAMETRIC_KEY, type ParametricModel } from '@/core/parametric/types';
+import {
+  constructionMounts,
+  createParametricModel,
+  PARAMETRIC_KEY,
+  type ParametricModel,
+} from '@/core/parametric/types';
 
 /** Схема установки верха. Расширяется добавлением значений/стратегий. */
 export type TopMount = 'between' | 'overlay'; // между боковинами | поверх боковин
@@ -122,9 +127,9 @@ export function toCabinetParameters(model: ParametricModel): CabinetParameters {
     depth: model.depth,
     thickness: model.thickness,
     material: model.materialId,
-    top: model.construction === 'ON_SIDES' ? 'overlay' : 'between',
-    // У низа своя пара значений: «под боковинами» — аналог крышки поверх.
-    bottom: model.construction === 'ON_SIDES' ? 'under' : 'between',
+    // Верх и низ читаются независимо: схема может быть смешанной (этап 37).
+    top: constructionMounts(model.construction).topOnSides ? 'overlay' : 'between',
+    bottom: constructionMounts(model.construction).bottomUnder ? 'under' : 'between',
     back: BACK_BY_TYPE[model.backPanel.type] ?? 'inset',
     backMaterial: model.backPanel.material,
     shelves: model.shelves.count,
