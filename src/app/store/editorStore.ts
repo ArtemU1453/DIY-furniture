@@ -117,6 +117,42 @@ import {
   upsertPlacement,
 } from '@/engines/cutting';
 import {
+  DEFAULT_EXPLODE,
+  DEFAULT_MEASURE,
+  DEFAULT_SECTION,
+  DEFAULT_SNAP,
+  DEFAULT_TREE_FILTER,
+  DEFAULT_VISIBILITY,
+  HOME_CAMERA,
+  addMeasurePoint,
+  buildFurnitureScene,
+  clearMeasures,
+  clearSelection as clearSceneSelectionState,
+  fitModel,
+  hideOthers,
+  homeView,
+  isolate as isolateNode,
+  planMove,
+  planRotate,
+  selectNode as selectSceneNodeState,
+  setView as setSceneViewState,
+  showAll as showAllNodes,
+  toggleHidden,
+  toggleMeasure as toggleMeasureState,
+  toggleNode as toggleSceneNodeState,
+  type CameraState,
+  type ExplodeState,
+  type MeasurePoint as ScenePoint,
+  type MeasureState as SceneMeasureState,
+  type SceneSelection,
+  type SceneView,
+  type SceneVisibility,
+  type SectionState,
+  type SnapSettings,
+  type TransformMode,
+  type TreeFilter,
+} from '@/engines/scene';
+import {
   importHardwareLibrary,
   planPresetApplication,
   canPlaceItem,
@@ -472,6 +508,46 @@ export const DEFAULT_VIEWER: ViewerUiState = {
   showMachining: false,
   isolatedPartId: null,
   snap: 10,
+};
+
+/**
+ * Состояние вида 3D-сцены (§147/§148).
+ *
+ * Это данные ПРОСМОТРА: камера, видимость, сечение, разнос и измерения. В
+ * производственную модель они не попадают, поэтому раскрой, спецификация и
+ * производство от поворота камеры не меняются.
+ */
+export interface SceneUiState {
+  visibility: SceneVisibility;
+  camera: CameraState;
+  section: SectionState;
+  explode: ExplodeState;
+  measure: SceneMeasureState;
+  selection: SceneSelection;
+  snap: SnapSettings;
+  mode: TransformMode;
+  treeFilter: TreeFilter;
+  /** Показывать отладочные данные узлов (§130/§131). */
+  debug: boolean;
+  /** В какой системе координат показывать значения (§134). */
+  space: 'LOCAL' | 'WORLD';
+  /** Счётчик принудительных пересборок сцены (§129). */
+  revision: number;
+}
+
+export const DEFAULT_SCENE_UI: SceneUiState = {
+  visibility: { ...DEFAULT_VISIBILITY, hidden: [] },
+  camera: { ...HOME_CAMERA, target: { ...HOME_CAMERA.target } },
+  section: { ...DEFAULT_SECTION },
+  explode: { ...DEFAULT_EXPLODE },
+  measure: { ...DEFAULT_MEASURE, results: [] },
+  selection: { ids: [], activeId: null },
+  snap: { ...DEFAULT_SNAP },
+  mode: 'SELECT',
+  treeFilter: { ...DEFAULT_TREE_FILTER },
+  debug: false,
+  space: 'WORLD',
+  revision: 0,
 };
 
 export interface EditorState {
@@ -911,6 +987,38 @@ export interface EditorState {
   exportCuttingJobsJson: () => string;
   /** Импорт заданий раскроя из JSON (§117). */
   importCuttingJobsJson: (json: string) => { ok: boolean; jobs: number; errors: string[] };
+
+  // ── 3D-редактор (этап 33) ─────────────────────────────────────────────────
+  /** Состояние вида сцены: видимость, камера, сечение, разнос (§147/§148). */
+  scene: SceneUiState;
+  setSceneState: (patch: Partial<SceneUiState>) => void;
+  /** Выбор узла с синхронизацией детали в 2D (§84/§85/§153/§154). */
+  selectSceneNode: (nodeId: string, additive?: boolean) => void;
+  clearSceneSelection: () => void;
+  /** Слои и вспомогательные элементы (§25–§30). */
+  setSceneVisibility: (patch: Partial<SceneVisibility>) => void;
+  /** Скрыть, изолировать, показать всё (§77–§81). */
+  hideSceneNode: (nodeId: string, hidden?: boolean) => void;
+  hideOtherSceneNodes: (nodeIds: string[]) => void;
+  isolateSceneNode: (nodeId: string | null) => void;
+  showAllSceneNodes: () => void;
+  /** Камера и виды (§47–§51, §160). */
+  setSceneView: (view: SceneView) => void;
+  fitSceneModel: () => void;
+  sceneHomeView: () => void;
+  /** Сечение (§69–§72). */
+  setSceneSection: (patch: Partial<SectionState>) => void;
+  /** Разнесённый вид (§73–§76). */
+  setSceneExplode: (patch: Partial<ExplodeState>) => void;
+  /** Измерение (§90–§94). */
+  addSceneMeasurePoint: (point: ScenePoint) => void;
+  clearSceneMeasures: () => void;
+  toggleSceneMeasure: (active?: boolean) => void;
+  /** Перемещение и поворот детали через правила модели (§58/§59/§63/§64). */
+  moveSceneNode: (nodeId: string, delta: { x: number; y: number; z: number }) => { ok: boolean; issues: string[] };
+  rotateSceneNode: (nodeId: string, axis: 'x' | 'y' | 'z', degrees: number) => { ok: boolean; issues: string[] };
+  /** Полная пересборка сцены (§129). */
+  rebuildSceneRevision: () => void;
 
   // ── Фурнитура на деталях (этап 32) ────────────────────────────────────────
   /** Поставить фурнитуру на деталь одной транзакцией (§103/§104/§137). */
@@ -3482,6 +3590,138 @@ export const useEditorStore = create<EditorState>()(
         }
         return { ok: true, jobs: result.jobs.length, errors: result.errors };
       },
+
+      // ── 3D-редактор (этап 33) ───────────────────────────────────────────
+      scene: {
+        ...DEFAULT_SCENE_UI,
+        visibility: { ...DEFAULT_SCENE_UI.visibility, hidden: [] },
+        camera: { ...DEFAULT_SCENE_UI.camera, target: { ...DEFAULT_SCENE_UI.camera.target } },
+        measure: { ...DEFAULT_SCENE_UI.measure, results: [] },
+        selection: { ids: [], activeId: null },
+      },
+
+      /* Состояние вида в историю НЕ пишется (§148): поворот камеры и скрытие
+       * объектов не являются изменением проекта. */
+      setSceneState: (patch) => set((s) => void Object.assign(s.scene, patch)),
+
+      selectSceneNode: (nodeId, additive) =>
+        set((s) => {
+          s.scene.selection = additive
+            ? toggleSceneNodeState(s.scene.selection, nodeId)
+            : selectSceneNodeState(nodeId);
+          /* Связь 3D → 2D (§85/§154): выбор узла детали выбирает ту же деталь
+           * в остальных экранах — общий selectedPartId, а не копия выбора. */
+          const scene = buildFurnitureScene(s.project, { includeMachining: false });
+          const node = scene.nodes[nodeId];
+          if (node?.kind === 'PART' && node.refId) {
+            s.selectedPartId = node.refId as PartId;
+          } else if (node?.kind === 'MACHINING' && node.refId) {
+            s.selectedOperationId = node.refId as MachiningId;
+          }
+        }),
+
+      clearSceneSelection: () =>
+        set((s) => {
+          s.scene.selection = clearSceneSelectionState();
+        }),
+
+      setSceneVisibility: (patch) =>
+        set((s) => void Object.assign(s.scene.visibility, patch)),
+
+      hideSceneNode: (nodeId, hidden) =>
+        set((s) => {
+          s.scene.visibility = toggleHidden(s.scene.visibility, nodeId, hidden);
+        }),
+
+      hideOtherSceneNodes: (nodeIds) =>
+        set((s) => {
+          const scene = buildFurnitureScene(s.project);
+          s.scene.visibility = hideOthers(scene, s.scene.visibility, nodeIds);
+        }),
+
+      isolateSceneNode: (nodeId) =>
+        set((s) => {
+          s.scene.visibility = isolateNode(s.scene.visibility, nodeId);
+        }),
+
+      showAllSceneNodes: () =>
+        set((s) => {
+          s.scene.visibility = showAllNodes(s.scene.visibility);
+        }),
+
+      setSceneView: (view) =>
+        set((s) => {
+          s.scene.camera = setSceneViewState(s.scene.camera, view);
+        }),
+
+      fitSceneModel: () =>
+        set((s) => {
+          const scene = buildFurnitureScene(s.project, { includeMachining: false });
+          s.scene.camera = fitModel(scene, s.scene.camera, s.scene.visibility);
+        }),
+
+      sceneHomeView: () =>
+        set((s) => {
+          const scene = buildFurnitureScene(s.project, { includeMachining: false });
+          s.scene.camera = homeView(scene);
+        }),
+
+      setSceneSection: (patch) => set((s) => void Object.assign(s.scene.section, patch)),
+
+      setSceneExplode: (patch) => set((s) => void Object.assign(s.scene.explode, patch)),
+
+      addSceneMeasurePoint: (point) =>
+        set((s) => {
+          s.scene.measure = addMeasurePoint(s.scene.measure, point);
+        }),
+
+      clearSceneMeasures: () =>
+        set((s) => {
+          s.scene.measure = clearMeasures(s.scene.measure);
+        }),
+
+      toggleSceneMeasure: (active) =>
+        set((s) => {
+          s.scene.measure = toggleMeasureState(s.scene.measure, active);
+        }),
+
+      moveSceneNode: (nodeId, delta) => {
+        const state = get();
+        const scene = buildFurnitureScene(state.project, { includeMachining: false });
+        const node = scene.nodes[nodeId];
+        const part = node?.refId ? findPart(state.project, node.refId as PartId) : undefined;
+        if (!node || node.kind !== 'PART' || !part) {
+          return { ok: false, issues: ['Перемещать можно только деталь.'] };
+        }
+        const plan = planMove(scene, state.project, part, { nodeId, delta }, state.scene.snap);
+        if (!plan.ok) return { ok: false, issues: plan.issues.map((i) => i.message) };
+        /* Изменение идёт через ProjectModel (§64): сцена сама ничего не двигает,
+         * поэтому Undo и пересчёт работают как для любой другой правки. */
+        commit((p) => {
+          const target = findPart(p, part.id);
+          if (target) target.position = plan.position;
+        });
+        return { ok: true, issues: plan.issues.map((i) => i.message) };
+      },
+
+      rotateSceneNode: (nodeId, axis, degrees) => {
+        const state = get();
+        const scene = buildFurnitureScene(state.project, { includeMachining: false });
+        const node = scene.nodes[nodeId];
+        const part = node?.refId ? findPart(state.project, node.refId as PartId) : undefined;
+        if (!node || node.kind !== 'PART' || !part) {
+          return { ok: false, issues: ['Поворачивать можно только деталь.'] };
+        }
+        const plan = planRotate(state.project, part, axis, degrees);
+        if (!plan.ok) return { ok: false, issues: plan.issues.map((i) => i.message) };
+        commit((p) => {
+          const target = findPart(p, part.id);
+          if (target) target.rotation = plan.rotation;
+        });
+        return { ok: true, issues: plan.issues.map((i) => i.message) };
+      },
+
+      rebuildSceneRevision: () => set((s) => void (s.scene.revision += 1)),
 
       // ── Фурнитура на деталях (этап 32) ──────────────────────────────────
       placeHardwareItem: (input) => {
