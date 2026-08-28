@@ -483,9 +483,14 @@ describe('Документы 16 — статусы, версии, валидац
   });
 
   it('Тест 27: DocumentValidator ловит битые размеры и потерянный материал', () => {
-    const id = parts()[0].id;
-    store().updatePart(id, { width: 0 });
-    const issues = validateModelLinks(project());
+    /* Через модель нулевой размер уже не записать (этап 36), но проверка
+     * остаётся нужной для проектов из файла: портим копию проекта. */
+    const broken = structuredClone(project());
+    const assembly = broken.furnitures
+      .flatMap((f) => f.assemblies)
+      .find((a) => a.parts.length > 0)!;
+    assembly.parts[0].width = 0;
+    const issues = validateModelLinks(broken);
     expect(issues.some((i) => i.code === 'drw.badSize')).toBe(true);
   });
 

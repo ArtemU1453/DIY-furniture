@@ -201,6 +201,7 @@ import {
   pruneDeadConnections,
   reconcileConnections,
 } from '@/engines/connections';
+import { validatePartChange } from '@/engines/viewer';
 import {
   buildUpdatePatches,
   linkProfile,
@@ -2610,11 +2611,20 @@ export const useEditorStore = create<EditorState>()(
         if (get().selectedPartId === id) set((s) => void (s.selectedPartId = null));
       },
 
-      updatePart: (id, patch) =>
+      /* Модель — источник истины, поэтому невозможная геометрия отсекается
+       * ЗДЕСЬ, а не только в форме (этап 36): деталь с нулевым или
+       * отрицательным размером ушла бы в раскрой, спецификацию и документы.
+       * Проверка та же, что и у панели свойств, — второго валидатора нет. */
+      updatePart: (id, patch) => {
+        const dimensions = validatePartChange(get().project, String(id), patch)
+          .filter((issue) => issue.code === 'chg.dim' && issue.severity === 'error');
+        if (dimensions.length > 0) return;
+        if (patch.quantity != null && (!Number.isFinite(patch.quantity) || patch.quantity < 1)) return;
         commit((p) => {
           const part = findPart(p, id);
           if (part) Object.assign(part, patch);
-        }),
+        });
+      },
 
       /* Кромка пишется в Part.edges — единственный источник истины (§6/§7).
        * EdgeBanding и EdgeOperation производны и пересчитываются сами, поэтому

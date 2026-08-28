@@ -122,6 +122,28 @@ export function App() {
     };
   }, [restored]);
 
+  /* Первое изделие должно быть видно целиком: камера стоит на фиксированном
+   * расстоянии, и шкаф 2400 мм выходил за кадр (этап 36). Подгоняем вид, когда
+   * сцена впервые показывает детали — ждём, пока камера будет создана. */
+  const partCount = allParts(project).length;
+  const fitted = useRef(false);
+  useEffect(() => {
+    if (partCount === 0) { fitted.current = false; return; }
+    if (fitted.current || centerView !== '3d') return;
+
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      const parts = allParts(useEditorStore.getState().project);
+      if (cameraRef.current && parts.length > 0) {
+        cameraRef.current.fitAll(overallDimensions(parts));
+        fitted.current = true;
+      }
+      if (fitted.current || attempts >= 10) window.clearInterval(timer);
+    }, 120);
+    return () => window.clearInterval(timer);
+  }, [partCount, centerView]);
+
   // Горячие клавиши.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
