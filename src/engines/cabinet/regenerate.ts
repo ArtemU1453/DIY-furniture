@@ -14,13 +14,13 @@
  * результат. Если на любом шаге найдена ошибка, возвращается applied: false и
  * ПРЕЖНИЕ детали и соединения — частично перестроенной конструкции не бывает.
  */
-import type { HardwareConnection, Part, Project } from '@/core/model/types';
+import type { Hardware, HardwareConnection, Part, Project } from '@/core/model/types';
 import type { FurnitureId } from '@/core/model/ids';
 import type { ParametricModel } from '@/core/parametric/types';
 import { findFurniture } from '@/core/model/selectors';
 import { generateParts, type GenerateResult } from '@/engines/parametric/generator';
 import { validateParametricModel } from '@/engines/parametric/validator';
-import { reconcileConnections } from '@/engines/connections/reconcile';
+import { ensureConnectionHardware, reconcileConnections } from '@/engines/connections/reconcile';
 import { toCabinetModel } from './model';
 import { checkCabinet, type CabinetIssue } from './collision';
 import { affectedByFields } from './dependencies';
@@ -38,6 +38,8 @@ export interface RegenerationResult {
   applied: boolean;
   parts: Part[];
   connections: HardwareConnection[];
+  /** Фурнитура, которой в проекте не было, но она нужна соединениям. */
+  hardware: Hardware[];
   issues: CabinetIssue[];
   steps: RegenerationStep[];
   /** Узлы графа зависимостей, затронутые изменением (§59). */
@@ -65,7 +67,7 @@ const failure = (
   steps: RegenerationStep[],
   issues: CabinetIssue[],
 ): RegenerationResult => ({
-  applied: false, parts, connections, issues, steps,
+  applied: false, parts, connections, hardware: [], issues, steps,
   affected: [], added: 0, removed: 0, changed: 0,
 });
 
@@ -126,11 +128,18 @@ export function regenerateCabinet(
   }
 
   // 4–5. Update Hardware + Connections.
-  const reconciled = reconcileConnections(project, generated.parts, {
+  const ctx = {
     jointCategory: model.jointType,
     construction: model.construction,
     handles: model.doors.handleEnabled,
-  });
+  };
+  /* Недостающая фурнитура добирается тем же общим шагом, что и при создании
+   * изделия (этап 35): иначе после смены параметров узлы молча исчезали бы. */
+  const hardware = ensureConnectionHardware(project, generated.parts, ctx);
+  const withHardware = hardware.length === 0
+    ? project
+    : { ...project, hardware: [...project.hardware, ...hardware] };
+  const reconciled = reconcileConnections(withHardware, generated.parts, ctx);
   steps.push({
     id: 'connections', label: 'Фурнитура и соединения', ok: true,
     detail: `+${reconciled.added.length} / −${reconciled.removed.length}`,
@@ -157,6 +166,7 @@ export function regenerateCabinet(
     applied: true,
     parts: generated.parts,
     connections: reconciled.connections,
+    hardware,
     issues: check.issues,
     steps,
     affected,

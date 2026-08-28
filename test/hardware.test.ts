@@ -40,6 +40,19 @@ function ensureHardware(category: HardwareCategory): HardwareId {
   const template = catalogByCategory(category)[0];
   return store().addHardwareFromTemplate(template);
 }
+/**
+ * Операции присадки, порождённые КОНКРЕТНЫМ соединением.
+ *
+ * Шкаф с этапа 35 создаётся сразу с корпусными узлами и их присадкой, поэтому
+ * проверять «всего операций в проекте» бессмысленно: тесты смотрят только на то,
+ * что добавило проверяемое соединение.
+ */
+function opsOf(connectionId: string) {
+  return generateMachining(project()).filter(
+    (o) => String(o.sourceHardwareConnectionId) === String(connectionId),
+  );
+}
+
 function connect(category: HardwareCategory, a: Part, b: Part, quantity?: number) {
   const hardwareId = ensureHardware(category);
   const res = store().addConnection({ hardwareId, partAId: a.id, partBId: b.id, quantity });
@@ -133,27 +146,27 @@ describe('Соединения и конструктивные узлы', () => 
     const side = partByType('side_left');
     const bottom = partByType('bottom');
     const id = connect('confirmat', side, bottom);
-    const opsBefore = generateMachining(project()).length;
+    const opsBefore = opsOf(id).length;
+    const connectionsBefore = project().hardwareConnections.length;
 
     const dupId = store().duplicateConnection(id)!;
     expect(dupId).toBeTruthy();
     expect(dupId).not.toBe(id);
-    expect(project().hardwareConnections).toHaveLength(2);
+    expect(project().hardwareConnections.length - connectionsBefore).toBe(1);
 
-    const ops = generateMachining(project());
-    expect(ops.length).toBe(opsBefore * 2);
-    // Операции копии имеют собственный источник (новый connection id).
-    expect(ops.some((o) => o.sourceHardwareConnectionId === dupId)).toBe(true);
-    expect(ops.some((o) => o.sourceHardwareConnectionId === id)).toBe(true);
+    // Копия даёт столько же операций, сколько оригинал, но со своим источником.
+    expect(opsOf(id).length).toBe(opsBefore);
+    expect(opsOf(dupId).length).toBe(opsBefore);
+    expect(opsBefore).toBeGreaterThan(0);
   });
 
   it('Тест 11: удаление соединения убирает производные операции', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
     const id = connect('dowel', side, bottom);
-    expect(generateMachining(project()).length).toBeGreaterThan(0);
+    expect(opsOf(id).length).toBeGreaterThan(0);
     store().removeConnection(id);
-    expect(generateMachining(project()).length).toBe(0);
+    expect(opsOf(id)).toHaveLength(0);
   });
 });
 
@@ -167,8 +180,7 @@ describe('Автоматическая присадка по типам креп
   it('Тест 12: шкант — глухие отверстия в обеих деталях', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
-    connect('dowel', side, bottom);
-    const ops = generateMachining(project());
+    const ops = opsOf(connect('dowel', side, bottom));
     expect(ops.length).toBeGreaterThan(0);
     expect(ops.some((o) => o.partId === side.id)).toBe(true);
     expect(ops.some((o) => o.partId === bottom.id)).toBe(true);
@@ -178,8 +190,7 @@ describe('Автоматическая присадка по типам креп
   it('Тест 13: конфирмат — сквозное в проходной + глухое направляющее в принимающей', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
-    connect('confirmat', side, bottom);
-    const ops = generateMachining(project());
+    const ops = opsOf(connect('confirmat', side, bottom));
     expect(ops.filter((o) => o.through).length).toBe(2);
     expect(ops.filter((o) => !o.through).length).toBe(2);
   });
@@ -187,8 +198,7 @@ describe('Автоматическая присадка по типам креп
   it('Тест 14: минификс — эксцентрик в проходной, шток в принимающей', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
-    connect('minifix', side, bottom);
-    const ops = generateMachining(project());
+    const ops = opsOf(connect('minifix', side, bottom));
     expect(ops.length).toBeGreaterThan(0);
     // Разные детали задействованы.
     expect(new Set(ops.map((o) => o.partId)).size).toBe(2);
@@ -204,8 +214,7 @@ describe('Автоматическая присадка по типам креп
   it('Тест 16: уголок создаёт отверстия с обеих сторон узла', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
-    connect('corner', side, bottom);
-    const ops = generateMachining(project());
+    const ops = opsOf(connect('corner', side, bottom));
     expect(ops.length).toBeGreaterThan(0);
     expect(new Set(ops.map((o) => o.partId)).size).toBe(2);
   });
@@ -224,8 +233,7 @@ describe('Автоматическая присадка по типам креп
   it('Тест 18: ручка — два сквозных отверстия на межцентровом расстоянии', () => {
     const facade = partByType('side_right');
     const other = partByType('side_left');
-    connect('handle', facade, other);
-    const ops = generateMachining(project()).filter((o) => o.partId === facade.id);
+    const ops = opsOf(connect('handle', facade, other)).filter((o) => o.partId === facade.id);
     expect(ops).toHaveLength(2);
     expect(ops.every((o) => o.through)).toBe(true);
     const dx = Math.abs(ops[0].x - ops[1].x);
@@ -235,8 +243,7 @@ describe('Автоматическая присадка по типам креп
   it('Тест 19: опора — четыре присадочных отверстия по углам', () => {
     const bottom = partByType('bottom');
     const other = partByType('side_left');
-    connect('leg', bottom, other);
-    const ops = generateMachining(project()).filter((o) => o.partId === bottom.id);
+    const ops = opsOf(connect('leg', bottom, other)).filter((o) => o.partId === bottom.id);
     expect(ops).toHaveLength(4);
     expect(ops.every((o) => o.face === 'bottom')).toBe(true);
   });
@@ -307,9 +314,10 @@ describe('Спецификация, чертежи и проверки', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
     const top = partByType('top');
-    connect('confirmat', side, bottom, 2);
-    connect('confirmat', side, top, 3);
-    const hwId = hardwareOf('confirmat')!.id;
+    // Отдельная позиция каталога: её используют только эти два соединения.
+    const hwId = store().addHardwareFromTemplate(catalogByCategory('confirmat')[0]);
+    store().addConnection({ hardwareId: hwId, partAId: side.id, partBId: bottom.id, quantity: 2 });
+    store().addConnection({ hardwareId: hwId, partAId: side.id, partBId: top.id, quantity: 3 });
     const ledger = buildHardwareLedger(project().hardware, project().hardwareConnections);
     expect(ledger.find((r) => r.hardwareId === hwId)!.count).toBe(5);
   });
@@ -362,22 +370,24 @@ describe('История и сериализация', () => {
   it('Тест 30: undo/redo отменяет и возвращает соединение', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
+    const before = project().hardwareConnections.length;
     connect('confirmat', side, bottom);
-    expect(project().hardwareConnections).toHaveLength(1);
+    expect(project().hardwareConnections.length).toBe(before + 1);
     store().undo();
-    expect(project().hardwareConnections).toHaveLength(0);
+    expect(project().hardwareConnections.length).toBe(before);
     store().redo();
-    expect(project().hardwareConnections).toHaveLength(1);
+    expect(project().hardwareConnections.length).toBe(before + 1);
   });
 
   it('Тест 31: соединения и присадка восстанавливаются из JSON', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
-    connect('confirmat', side, bottom, 2);
+    const id = connect('confirmat', side, bottom, 2);
     const restored = deserializeProject(serializeProject(project()));
-    expect(restored.hardwareConnections).toHaveLength(1);
-    expect(restored.hardwareConnections[0].quantity).toBe(2);
-    expect(restored.hardwareConnections[0].jointType).toBeDefined();
+    expect(restored.hardwareConnections).toHaveLength(project().hardwareConnections.length);
+    const conn = restored.hardwareConnections.find((c) => String(c.id) === String(id))!;
+    expect(conn.quantity).toBe(2);
+    expect(conn.jointType).toBeDefined();
     // Производные операции пересчитываются из связей после загрузки.
     expect(generateMachining(restored).length).toBeGreaterThan(0);
   });

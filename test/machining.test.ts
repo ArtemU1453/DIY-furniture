@@ -15,6 +15,17 @@ const project = () => store().project;
 function partByType(type: string): Part {
   return allParts(project()).find((p) => p.metadata?.partType === type)!;
 }
+/**
+ * Операции присадки, порождённые КОНКРЕТНЫМ соединением: шкаф с этапа 35
+ * создаётся уже с корпусными узлами, поэтому «всего операций» ничего не говорит
+ * о проверяемом соединении.
+ */
+function opsOf(connectionId: string) {
+  return generateMachining(project()).filter(
+    (o) => String(o.sourceHardwareConnectionId) === String(connectionId),
+  );
+}
+
 function connect(type: 'dowel' | 'confirmat', a: Part, b: Part) {
   const hw = project().hardware.find((h) => h.category === type)!;
   const res = store().addConnection({ hardwareId: hw.id, partAId: a.id, partBId: b.id });
@@ -46,9 +57,7 @@ describe('MachiningEngine — генерация присадки', () => {
   it('Тест 2: конфирмат создаёт сквозное в проходной детали и глухое в принимающей', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
-    connect('confirmat', side, bottom);
-
-    const ops = generateMachining(project());
+    const ops = opsOf(connect('confirmat', side, bottom).id!);
     const through = ops.filter((o) => o.through === true);
     const blind = ops.filter((o) => o.through === false);
     expect(through.length).toBe(2); // 2 конфирмата по умолчанию
@@ -126,13 +135,14 @@ describe('MachiningEngine — GENERATED/MANUAL, сохранение', () => {
   it('Тест 7: соединения и операции восстанавливаются из JSON', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
-    connect('confirmat', side, bottom);
+    const id = connect('confirmat', side, bottom).id!;
     store().addManualOperation({ partId: side.id, face: 'front', x: 50, y: 50, diameter: 8, depth: 10 });
 
     const restored = deserializeProject(serializeProject(project()));
     // ручная операция сохранена в модели
     expect(allParts(restored).some((p) => p.machining.length > 0)).toBe(true);
-    expect(restored.hardwareConnections).toHaveLength(1);
+    expect(restored.hardwareConnections).toHaveLength(project().hardwareConnections.length);
+    expect(restored.hardwareConnections.some((c) => String(c.id) === String(id))).toBe(true);
     // производные операции пересчитываются из связей после загрузки
     const genOps = generateMachining(restored);
     expect(genOps.length).toBeGreaterThan(0);
@@ -154,8 +164,8 @@ describe('MachiningEngine — GENERATED/MANUAL, сохранение', () => {
     const side = partByType('side_left');
     const bottom = partByType('bottom');
     const res = connect('dowel', side, bottom);
-    expect(generateMachining(project()).length).toBeGreaterThan(0);
+    expect(opsOf(res.id!).length).toBeGreaterThan(0);
     store().removeConnection(res.id!);
-    expect(generateMachining(project()).length).toBe(0);
+    expect(opsOf(res.id!)).toHaveLength(0);
   });
 });

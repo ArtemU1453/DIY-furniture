@@ -111,13 +111,15 @@ describe('Hardware и HardwareConnection', () => {
     store().createCabinet();
     const parts = allParts(store().project);
     const hw = store().project.hardware[0];
+    // Шкаф уже приходит со своими узлами — считаем прибавку, а не итог.
+    const before = store().project.hardwareConnections.length;
     const res = store().addConnection({
       hardwareId: hw.id,
       partAId: parts[0].id,
       partBId: parts[1].id,
     });
     expect(res.ok).toBe(true);
-    expect(store().project.hardwareConnections).toHaveLength(1);
+    expect(store().project.hardwareConnections.length - before).toBe(1);
   });
 
   it('отклоняет соединение детали с самой собой и битые ссылки', () => {
@@ -133,7 +135,9 @@ describe('Hardware и HardwareConnection', () => {
   it('количество фурнитуры считается из соединений', () => {
     store().createCabinet();
     const parts = allParts(store().project);
-    const hw = store().project.hardware[0];
+    // Отдельная позиция: её используют только эти два соединения.
+    const hw = createBlankHardware();
+    store().addHardware(hw);
     store().addConnection({ hardwareId: hw.id, partAId: parts[0].id, partBId: parts[1].id });
     store().addConnection({ hardwareId: hw.id, partAId: parts[0].id, partBId: parts[2].id });
     const ledger = buildHardwareLedger(store().project.hardware, store().project.hardwareConnections);
@@ -163,7 +167,9 @@ describe('Serialization и Regression', () => {
     const original = store().project;
     const restored = deserializeProject(serializeProject(original));
     expect(restored).toEqual(original);
-    expect(restored.hardwareConnections).toHaveLength(1);
+    expect(restored.hardwareConnections).toHaveLength(original.hardwareConnections.length);
+    expect(restored.hardwareConnections.some((c) => String(c.partAId) === String(parts[0].id)
+      && String(c.partBId) === String(parts[1].id))).toBe(true);
     expect(restored.furnitures.find((f) => f.id === id)!.assemblies[0].parts.length).toBeGreaterThan(0);
   });
 

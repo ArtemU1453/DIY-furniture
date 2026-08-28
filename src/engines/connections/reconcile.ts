@@ -14,11 +14,13 @@
  * если правила его бы не создали.
  */
 import type {
+  Hardware,
   HardwareCategory,
   HardwareConnection,
   Part,
   Project,
 } from '@/core/model/types';
+import { catalogByCategory, hardwareFromTemplate } from '@/core/model/hardwareCatalog';
 import type { HardwareConnectionId, HardwareId } from '@/core/model/ids';
 import { newHardwareConnectionId } from '@/core/model/ids';
 import { allParts } from '@/core/model/selectors';
@@ -126,6 +128,37 @@ export function reconcileConnections(
     manual: manual.map((c) => c.stableId ?? String(c.id)),
     orphaned,
   };
+}
+
+/**
+ * Дозавести фурнитуру, которой требуют запланированные соединения (этап 35).
+ *
+ * reconcileConnections молча пропускает узел, если в проекте нет фурнитуры его
+ * категории. Раньше это компенсировал только путь шаблонов — из-за чего один и
+ * тот же шкаф, созданный мастером, получал меньше соединений (а значит и
+ * присадки), чем созданный из шаблона. Теперь недостающие позиции добирает
+ * общий шаг, и оба пути дают одинаковый результат.
+ *
+ * Возвращает НОВЫЕ позиции фурнитуры; записывает их вызывающий — тем же
+ * commit, что и детали, поэтому шаг целиком ложится в undo/redo.
+ */
+export function ensureConnectionHardware(
+  project: Project,
+  parts: Part[],
+  ctx: Omit<ConnectionRuleContext, 'parts'>,
+): Hardware[] {
+  const created: Hardware[] = [];
+  const has = (category: HardwareCategory) =>
+    project.hardware.some((h) => h.category === category)
+    || created.some((h) => h.category === category);
+
+  for (const plan of planConnections({ ...ctx, parts })) {
+    if (has(plan.category)) continue;
+    const template = catalogByCategory(plan.category)[0];
+    if (!template) continue; // категории нет в каталоге — соединение не создастся
+    created.push(hardwareFromTemplate(template));
+  }
+  return created;
 }
 
 /**

@@ -11,13 +11,16 @@ import type { MaterialId } from '@/core/model/ids';
 import {
   createParametricModel,
   DEFAULT_LIMITS,
+  PARAMETRIC_KEY,
   type FurnitureKind,
   type ParametricModel,
 } from '@/core/parametric/types';
 import type { CabinetParameters } from '@/engines/furniture/cabinet/parameters';
 
-/** Ключ, под которым параметрическая модель живёт в params изделия. */
-export const PARAMETRIC_KEY = 'parametric';
+export { PARAMETRIC_KEY };
+/* Обратное преобразование живёт рядом с самими параметрами: так его читает и
+ * readCabinetParameters, не создавая круговой зависимости (этап 35). */
+export { toCabinetParameters } from '@/engines/furniture/cabinet/parameters';
 
 export interface ParametricTemplate {
   id: string;
@@ -111,8 +114,9 @@ const BACK_TYPE_MAP: Record<string, ParametricModel['backPanel']['type']> = {
 export function fromCabinetParameters(params: Partial<CabinetParameters>): ParametricModel {
   const thickness = params.thickness ?? 16;
   const construction = params.top === 'overlay' ? 'ON_SIDES' : 'BETWEEN_SIDES';
+  const boardOnly = params.boardOnly === true;
   return createParametricModel({
-    kind: 'CABINET',
+    kind: boardOnly ? 'BOARD' : 'CABINET',
     width: params.width ?? 800,
     height: params.height ?? 2000,
     depth: params.depth ?? 600,
@@ -143,7 +147,8 @@ export function fromCabinetParameters(params: Partial<CabinetParameters>): Param
       offset: params.construction?.backOffset ?? 0,
       material: (params.backMaterial ?? null) as MaterialId | null,
     },
-    limits: { ...DEFAULT_LIMITS },
+    // У щита высота равна толщине — корпусный минимум к нему неприменим.
+    limits: boardOnly ? { ...DEFAULT_LIMITS, minimumHeight: 1 } : { ...DEFAULT_LIMITS },
   });
 }
 

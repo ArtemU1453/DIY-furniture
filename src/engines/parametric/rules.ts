@@ -16,6 +16,7 @@ import type {
   ParametricRule,
   PartDefinition,
 } from '@/core/parametric/types';
+import type { Section } from '@/core/model/types';
 import type { MaterialId } from '@/core/model/ids';
 import type { MachiningId } from '@/core/model/ids';
 import type { MachiningOperation, PartFace, Rotation, Vec3 } from '@/core/model/types';
@@ -278,22 +279,52 @@ export function shelfOffsets(model: ParametricModel): number[] {
   });
 }
 
+/**
+ * Границы секций по ширине: перегородки делят внутренний проём (§30).
+ *
+ * Один расчёт на всех: им пользуются и правило полок, и секции изделия, —
+ * чтобы полка и секция не разъехались из-за двух похожих формул.
+ */
+export function sectionBounds(model: ParametricModel): Array<{ min: number; max: number }> {
+  const g = computeGeometry(model);
+  const bounds: Array<{ min: number; max: number }> = [];
+  let left = g.interior.x.min;
+  for (const c of partitionPositions(model)) {
+    bounds.push({ min: left, max: c - g.t / 2 });
+    left = c + g.t / 2;
+  }
+  bounds.push({ min: left, max: g.interior.x.max });
+  return bounds;
+}
+
+/**
+ * Секции изделия (Furniture.sections) — производная величина от модели.
+ *
+ * Хранится в ProjectModel как удобный срез, но НЕ является источником истины:
+ * при каждой генерации пересчитывается отсюда.
+ */
+export function modelSections(model: ParametricModel): Section[] {
+  if (model.kind === 'BOARD') return []; // щит — одна деталь, внутреннего пространства нет
+  const g = computeGeometry(model);
+  return sectionBounds(model).map((b, i) => ({
+    id: `sec_${i}`,
+    index: i,
+    x: b.min,
+    width: b.max - b.min,
+    y: g.interior.y.min,
+    height: g.interior.y.max - g.interior.y.min,
+    z: 0,
+    depth: model.depth,
+  }));
+}
+
 export const shelfRule: ParametricRule = {
   id: 'CABINET.SHELVES',
   name: 'Полки',
   build(model) {
     const g = computeGeometry(model);
     const offsets = shelfOffsets(model);
-    const centers = partitionPositions(model);
-
-    // Границы секций по ширине: перегородки делят проём.
-    const bounds: Array<{ min: number; max: number }> = [];
-    let left = g.interior.x.min;
-    for (const c of centers) {
-      bounds.push({ min: left, max: c - g.t / 2 });
-      left = c + g.t / 2;
-    }
-    bounds.push({ min: left, max: g.interior.x.max });
+    const bounds = sectionBounds(model);
 
     const shelfZMax = Math.min(g.interiorDepthMax, model.depth - model.shelves.depthReduction);
     const shelfMode = model.shelves.mode ?? 'ADJUSTABLE';
@@ -798,7 +829,33 @@ export const SHELVING_RULES: ParametricRule[] = [
 ];
 
 /** Правила по типу изделия (§57). */
+/**
+ * Полка-щит (этап 35): изделие из одной детали.
+ *
+ * Раньше её строил отдельный движок шаблонов — теперь она проходит тем же
+ * путём, что и шкаф, и получает те же номера, кромку и раскрой.
+ */
+export const boardRule: ParametricRule = {
+  id: 'BOARD.PANEL',
+  name: 'Полка-щит',
+  build(model) {
+    return [define(
+      'BOARD.PANEL', 'Полка', 'SHELF',
+      {
+        x: { min: 0, max: model.width },
+        y: { min: 0, max: model.thickness },
+        z: { min: 0, max: model.depth },
+      },
+      'y', model, model.materialId, { partType: 'board' },
+    )];
+  },
+};
+
+/** Правила полки-щита: единственная деталь. */
+export const BOARD_RULES: ParametricRule[] = [boardRule];
+
 export function rulesForKind(kind: ParametricModel['kind']): ParametricRule[] {
+  if (kind === 'BOARD') return BOARD_RULES;
   return kind === 'SHELVING' ? SHELVING_RULES : CABINET_PARAMETRIC_RULES;
 }
 

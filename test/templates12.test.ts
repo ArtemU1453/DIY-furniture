@@ -18,11 +18,15 @@ import {
   validateTemplateValues,
   validateTemplateGeometry,
   instantiateTemplate,
-  planCabinetConnections,
   loadCustomTemplates,
   removeCustomTemplate,
 } from '@/engines/templates';
-import { buildCabinet } from '@/engines/furniture/cabinet';
+import type { CabinetParameters } from '@/engines/furniture/cabinet';
+import { fromCabinetParameters, generateParts } from '@/engines/parametric';
+import { cabinetConnectionContext, planConnections } from '@/engines/connections';
+
+/* Детали строит тот же единый генератор, что и приложение (этап 35). */
+const build = (params: CabinetParameters) => generateParts(fromCabinetParameters(params), []);
 import { isCuttingStale } from '@/engines/cutting';
 import { generateMachining as genM } from '@/engines/machining';
 import { isDocumentsOutdated } from '@/engines/drawing';
@@ -114,23 +118,23 @@ describe('Шаблоны 12 — параметры и распространен
     const t = findTemplate('tpl-cabinet')!;
     const base = instantiateTemplate(t, { ...defaultValues(t), shelfCount: 2, doorCount: 0, verticalPartitionCount: 0 }, mats()).params;
     const more = instantiateTemplate(t, { ...defaultValues(t), shelfCount: 6, doorCount: 0, verticalPartitionCount: 0 }, mats()).params;
-    expect(buildCabinet(more).parts.length).toBeGreaterThan(buildCabinet(base).parts.length);
+    expect(build(more).parts.length).toBeGreaterThan(build(base).parts.length);
   });
 
   it('Тест 14: количество перегородок', () => {
     const t = findTemplate('tpl-cabinet')!;
     const p = instantiateTemplate(t, { ...defaultValues(t), verticalPartitionCount: 2, doorCount: 0 }, mats()).params;
     expect(p.dividers).toBe(2);
-    expect(buildCabinet(p).parts.filter((x) => x.metadata?.partType === 'divider').length).toBe(2);
+    expect(build(p).parts.filter((x) => x.metadata?.partType === 'divider').length).toBe(2);
   });
 
   it('Тест 15: количество фасадов создаёт фасады нужной ширины', () => {
     const t = findTemplate('tpl-cabinet')!;
     const p = instantiateTemplate(t, { ...defaultValues(t), width: 800, doorCount: 2, doorGap: 2 }, mats()).params;
-    const facades = buildCabinet(p).parts.filter((x) => x.metadata?.partType === 'facade');
+    const facades = build(p).parts.filter((x) => x.metadata?.partType === 'facade');
     expect(facades.length).toBe(2);
-    // Ширина каждого фасада рассчитана автоматически: (800 - 2*3 - 2)/2 ≈ 396.
-    expect(facades[0].width).toBeCloseTo((800 - 2 * 3 - 2) / 2, 0);
+    // Ширина фасада: (ширина − боковые зазоры по 2 − зазор между) / 2.
+    expect(facades[0].width).toBeCloseTo((800 - 2 * 2 - 2) / 2, 0);
     expect(facades[0].width).toBeLessThan(800);
   });
 
@@ -145,8 +149,8 @@ describe('Шаблоны 12 — параметры и распространен
     const t = findTemplate('tpl-cabinet')!;
     const p16 = instantiateTemplate(t, { ...defaultValues(t), materialThickness: 16, doorCount: 0 }, mats()).params;
     const p18 = instantiateTemplate(t, { ...defaultValues(t), materialThickness: 18, doorCount: 0 }, mats()).params;
-    const top16 = buildCabinet(p16).parts.find((x) => x.metadata?.partType === 'top')!;
-    const top18 = buildCabinet(p18).parts.find((x) => x.metadata?.partType === 'top')!;
+    const top16 = build(p16).parts.find((x) => x.metadata?.partType === 'top')!;
+    const top18 = build(p18).parts.find((x) => x.metadata?.partType === 'top')!;
     expect(top16.thickness).toBe(16);
     expect(top18.thickness).toBe(18);
     // Верх между боковинами: ширина = W - 2*t → при большей толщине меньше.
@@ -156,7 +160,7 @@ describe('Шаблоны 12 — параметры и распространен
   it('Тест 18: тип соединения задаёт категорию крепежа в плане', () => {
     const t = findTemplate('tpl-cabinet')!;
     const p = instantiateTemplate(t, { ...defaultValues(t), jointType: 'dowel', doorCount: 0 }, mats()).params;
-    const plan = planCabinetConnections(buildCabinet(p).parts, p);
+    const plan = planConnections({ ...cabinetConnectionContext(p), parts: build(p).parts });
     expect(plan.some((c) => c.category === 'dowel')).toBe(true);
     expect(plan.some((c) => c.category === 'confirmat')).toBe(false);
   });
