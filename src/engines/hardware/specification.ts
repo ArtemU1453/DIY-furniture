@@ -8,7 +8,9 @@
  */
 import type { Hardware, HardwareStatus, Project } from '@/core/model/types';
 import type { HardwareId } from '@/core/model/ids';
+import { allParts } from '@/core/model/selectors';
 import { HARDWARE_CATEGORY_LABELS } from '@/i18n/catalog';
+import { resolveHardwareItem, resolveItemPart } from './parametric';
 import { allHardwareInstances } from './instances';
 import { expandKit, kitOfHardware, projectKits, type ExpandedComponent } from './kits';
 import { findHardware, hardwareStatus } from './status';
@@ -37,9 +39,20 @@ export const HARDWARE_UNIT = 'шт.';
  */
 export function hardwareCounts(project: Project): Map<string, number> {
   const counts = new Map<string, number>();
+  const parts = allParts(project);
   for (const inst of allHardwareInstances(project)) {
     const key = String(inst.hardwareId);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    /* Единица соединения — всегда одна штука, а установленная напрямую может
+     * представлять несколько элементов (четыре петли на фасаде): их число
+     * даёт раскладка вида, а не отдельное поле (§69/§93). */
+    let units = 1;
+    if (!inst.connectionId) {
+      const hardware = findHardware(project, key);
+      const part = resolveItemPart(parts, inst);
+      units = inst.quantity
+        ?? (hardware && part ? Math.max(1, resolveHardwareItem(inst, hardware, part).anchors.length) : 1);
+    }
+    counts.set(key, (counts.get(key) ?? 0) + units);
   }
   return counts;
 }

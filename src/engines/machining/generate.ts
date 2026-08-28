@@ -9,6 +9,7 @@ import type { MachiningOperation, MachiningOverride, Part, Project } from '@/cor
 import { allParts, findPart } from '@/core/model/selectors';
 import { getMachiningRule } from './rules';
 import { applyRule, isApplicable } from './declarative';
+import { generateItemMachining } from './items';
 
 /**
  * Применить ручную правку к автоматической операции (§42). Правка хранится в
@@ -66,9 +67,16 @@ export function manualOperations(project: Project): MachiningOperation[] {
   return allParts(project).flatMap((p) => p.machining);
 }
 
-/** Все операции присадки: производные + ручные, с назначенной нумерацией. */
+/**
+ * Все операции присадки: производные (по связям и по установленной
+ * фурнитуре), ручные — с назначенной нумерацией.
+ */
 export function allOperations(project: Project): MachiningOperation[] {
-  const combined = [...generateMachining(project), ...manualOperations(project)];
+  const combined = [
+    ...generateMachining(project),
+    ...generateItemMachining(project),
+    ...manualOperations(project),
+  ];
   // Стабильный порядок: по детали, затем по грани, затем по координатам.
   combined.sort((a, b) => {
     if (a.partId !== b.partId) return a.partId.localeCompare(b.partId);

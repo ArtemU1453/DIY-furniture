@@ -116,7 +116,30 @@ import {
   reserveForJob,
   upsertPlacement,
 } from '@/engines/cutting';
-import { importHardwareLibrary, planPresetApplication } from '@/engines/hardware';
+import {
+  importHardwareLibrary,
+  planPresetApplication,
+  canPlaceItem,
+  createCustomEntry,
+  createItem,
+  createSet,
+  duplicateEntry,
+  duplicateItem,
+  exportCatalog,
+  findEntry,
+  importCatalog,
+  loadCatalog,
+  mergeCatalog,
+  mirrorItem,
+  moveItem,
+  nudgeItem,
+  removalImpact,
+  resetItem,
+  saveCatalog,
+  toggleFavorite,
+  type CreateItemInput,
+  type CustomHardwareInput,
+} from '@/engines/hardware';
 import {
   bumpRevision,
   createRelease,
@@ -155,6 +178,8 @@ import {
 import type {
   CuttingReport,
   CuttingSettings,
+  HardwareCatalog,
+  HardwareItem,
   ProductionStatus,
   QualityThresholds,
   EdgeMaterial,
@@ -886,6 +911,42 @@ export interface EditorState {
   exportCuttingJobsJson: () => string;
   /** Импорт заданий раскроя из JSON (§117). */
   importCuttingJobsJson: (json: string) => { ok: boolean; jobs: number; errors: string[] };
+
+  // ── Фурнитура на деталях (этап 32) ────────────────────────────────────────
+  /** Поставить фурнитуру на деталь одной транзакцией (§103/§104/§137). */
+  placeHardwareItem: (input: CreateItemInput) => { ok: boolean; itemId?: string; errors: string[] };
+  /** Переместить единицу: пишется Override (§80). */
+  moveHardwareItem: (id: string, target: { x?: number; y?: number; z?: number }) => void;
+  /** Сдвинуть выбранные единицы (§109). */
+  nudgeHardwareItems: (ids: string[], dx: number, dy: number) => void;
+  /** Вернуть автоматическое положение (§81). */
+  resetHardwareItem: (id: string) => void;
+  /** Зафиксировать положение (§65). */
+  lockHardwareItem: (id: string, locked: boolean) => void;
+  /** Показать/скрыть (§66). */
+  hideHardwareItem: (id: string, hidden: boolean) => void;
+  /** Независимая копия (§106). */
+  duplicateHardwareItem: (id: string) => string | null;
+  /** Зеркальная копия (§107). */
+  mirrorHardwareItem: (id: string) => string | null;
+  /** Удалить единицу вместе с её связями и присадкой (§105). */
+  removeHardwareItem: (id: string) => void;
+  /** Собрать комплект из единиц (§67). */
+  groupHardwareItems: (name: string, ids: string[]) => string | null;
+  /** Правка параметров единицы (§90). */
+  updateHardwareItem: (id: string, patch: Partial<HardwareItem>) => void;
+
+  // ── Каталог фурнитуры (этап 32) ───────────────────────────────────────────
+  /** Текущий каталог (локальный, §119). */
+  hardwareCatalog: HardwareCatalog;
+  setHardwareCatalog: (catalog: HardwareCatalog) => void;
+  toggleHardwareFavorite: (entryId: string) => void;
+  createCustomHardware: (input: CustomHardwareInput) => string | null;
+  duplicateHardwareEntry: (entryId: string) => string | null;
+  /** Добавить позицию каталога в проект (§99). */
+  addCatalogHardwareToProject: (entryId: string) => string | null;
+  exportHardwareCatalogJson: () => string;
+  importHardwareCatalogJson: (json: string) => { ok: boolean; imported: number; errors: string[] };
 
   // ── Производство (этап 31) ────────────────────────────────────────────────
   /** Пересчитать снимок производства и статус задания (§76/§81). */
@@ -3420,6 +3481,177 @@ export const useEditorStore = create<EditorState>()(
           });
         }
         return { ok: true, jobs: result.jobs.length, errors: result.errors };
+      },
+
+      // ── Фурнитура на деталях (этап 32) ──────────────────────────────────
+      placeHardwareItem: (input) => {
+        const project = get().project;
+        const item = createItem(project, input);
+        if (!item) return { ok: false, errors: ['Позиция каталога или деталь не найдена.'] };
+
+        /* Атомарность (§104): если фурнитуру поставить нельзя, в проект не
+         * попадает ничего — ни единица, ни присадка. */
+        const draft = { ...project, hardwareInstances: [...(project.hardwareInstances ?? []), item] };
+        const check = canPlaceItem(draft, item);
+        if (!check.ok) {
+          return { ok: false, errors: check.issues.filter((i) => i.severity === 'error').map((i) => i.message) };
+        }
+        commit((p) => {
+          p.hardwareInstances = [...(p.hardwareInstances ?? []), item];
+        });
+        return { ok: true, itemId: item.id, errors: [] };
+      },
+
+      moveHardwareItem: (id, target) => {
+        const project = get().project;
+        const item = (project.hardwareInstances ?? []).find((i) => i.id === id);
+        if (!item) return;
+        const moved = moveItem(project, item, target);
+        commit((p) => {
+          p.hardwareInstances = (p.hardwareInstances ?? []).map((i) => (i.id === id ? moved : i));
+        });
+      },
+
+      nudgeHardwareItems: (ids, dx, dy) => {
+        const set = new Set(ids);
+        commit((p) => {
+          p.hardwareInstances = (p.hardwareInstances ?? []).map((i) =>
+            (set.has(i.id) ? nudgeItem(i, dx, dy) : i));
+        });
+      },
+
+      resetHardwareItem: (id) =>
+        commit((p) => {
+          p.hardwareInstances = (p.hardwareInstances ?? []).map((i) => (i.id === id ? resetItem(i) : i));
+        }),
+
+      lockHardwareItem: (id, locked) =>
+        commit((p) => {
+          p.hardwareInstances = (p.hardwareInstances ?? []).map((i) => (i.id === id ? { ...i, locked } : i));
+        }),
+
+      hideHardwareItem: (id, hidden) =>
+        commit((p) => {
+          p.hardwareInstances = (p.hardwareInstances ?? []).map((i) => (i.id === id ? { ...i, hidden } : i));
+        }),
+
+      duplicateHardwareItem: (id) => {
+        const project = get().project;
+        const item = (project.hardwareInstances ?? []).find((i) => i.id === id);
+        if (!item) return null;
+        const copy = duplicateItem(project, item);
+        commit((p) => {
+          p.hardwareInstances = [...(p.hardwareInstances ?? []), copy];
+        });
+        return copy.id;
+      },
+
+      mirrorHardwareItem: (id) => {
+        const project = get().project;
+        const item = (project.hardwareInstances ?? []).find((i) => i.id === id);
+        if (!item) return null;
+        const mirrored = mirrorItem(project, item);
+        if (!mirrored) return null;
+        commit((p) => {
+          p.hardwareInstances = [...(p.hardwareInstances ?? []), mirrored];
+        });
+        return mirrored.id;
+      },
+
+      removeHardwareItem: (id) => {
+        const project = get().project;
+        const impact = removalImpact(project, id);
+        if (impact.itemIds.length === 0) return;
+        commit((p) => {
+          p.hardwareInstances = (p.hardwareInstances ?? []).filter((i) => i.id !== id);
+          /* Связи и присадка удаляются только свои (§105): присадка выводится
+           * из единицы, поэтому исчезает сама, а ручные правки к её операциям
+           * больше не нужны. */
+          if (impact.connectionIds.length > 0) {
+            const drop = new Set(impact.connectionIds);
+            p.hardwareConnections = p.hardwareConnections.filter((c) => !drop.has(String(c.id)));
+          }
+          const overrides = p.machining.overrides ?? {};
+          for (const opId of impact.operationIds) delete overrides[opId];
+          p.machining.overrides = overrides;
+          p.hardwareItemSets = (p.hardwareItemSets ?? [])
+            .map((s) => ({ ...s, itemIds: s.itemIds.filter((x) => x !== id) }))
+            .filter((s) => s.itemIds.length > 0);
+        });
+      },
+
+      groupHardwareItems: (name, ids) => {
+        const project = get().project;
+        const known = new Set((project.hardwareInstances ?? []).map((i) => i.id));
+        const members = ids.filter((id) => known.has(id));
+        if (members.length === 0) return null;
+        const set = createSet(project, name, members);
+        commit((p) => {
+          p.hardwareItemSets = [...(p.hardwareItemSets ?? []), set];
+          p.hardwareInstances = (p.hardwareInstances ?? []).map((i) =>
+            (members.includes(i.id) ? { ...i, setId: set.id } : i));
+        });
+        return set.id;
+      },
+
+      updateHardwareItem: (id, patch) =>
+        commit((p) => {
+          p.hardwareInstances = (p.hardwareInstances ?? []).map((i) =>
+            (i.id === id ? { ...i, ...patch, id: i.id } as HardwareItem : i));
+        }),
+
+      // ── Каталог фурнитуры (этап 32) ─────────────────────────────────────
+      hardwareCatalog: loadCatalog(),
+
+      setHardwareCatalog: (catalog) => {
+        saveCatalog(catalog);
+        set((s) => { s.hardwareCatalog = catalog; });
+      },
+
+      toggleHardwareFavorite: (entryId) => {
+        const next = toggleFavorite(get().hardwareCatalog, entryId);
+        saveCatalog(next);
+        set((s) => { s.hardwareCatalog = next; });
+      },
+
+      createCustomHardware: (input) => {
+        const result = createCustomEntry(get().hardwareCatalog, input);
+        saveCatalog(result.catalog);
+        set((s) => { s.hardwareCatalog = result.catalog; });
+        return String(result.entry.hardware.id);
+      },
+
+      duplicateHardwareEntry: (entryId) => {
+        const result = duplicateEntry(get().hardwareCatalog, entryId);
+        if (!result) return null;
+        saveCatalog(result.catalog);
+        set((s) => { s.hardwareCatalog = result.catalog; });
+        return String(result.entry.hardware.id);
+      },
+
+      addCatalogHardwareToProject: (entryId) => {
+        const entry = findEntry(get().hardwareCatalog, entryId);
+        if (!entry) return null;
+        const project = get().project;
+        // Позиция уже в проекте — второй раз её не добавляем.
+        if (project.hardware.some((h) => String(h.id) === entryId)) return entryId;
+        commit((p) => {
+          p.hardware.push({ ...entry.hardware, metadata: { ...entry.hardware.metadata, kind: entry.kind } });
+        });
+        return entryId;
+      },
+
+      exportHardwareCatalogJson: () => exportCatalog(get().hardwareCatalog),
+
+      importHardwareCatalogJson: (json) => {
+        const result = importCatalog(json);
+        if (!result.ok || !result.catalog) {
+          return { ok: false, imported: 0, errors: result.errors };
+        }
+        const merged = mergeCatalog(get().hardwareCatalog, result.catalog);
+        saveCatalog(merged);
+        set((s) => { s.hardwareCatalog = merged; });
+        return { ok: true, imported: result.imported, errors: result.errors };
       },
 
       // ── Производство (этап 31) ──────────────────────────────────────────

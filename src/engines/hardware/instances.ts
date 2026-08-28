@@ -48,9 +48,17 @@ export function instancesOfConnection(
   return out;
 }
 
-/** Все установленные единицы проекта. */
+/**
+ * Все установленные единицы проекта.
+ *
+ * Это единицы соединений ПЛЮС фурнитура, поставленная на деталь напрямую
+ * (этап 32). Спецификация, документы и производство читают один и тот же
+ * список — второго перечня установленной фурнитуры не существует (§135).
+ */
 export function allHardwareInstances(project: Project): HardwareInstance[] {
-  return project.hardwareConnections.flatMap((c) => instancesOfConnection(project, c));
+  const fromConnections = project.hardwareConnections.flatMap((c) => instancesOfConnection(project, c));
+  const placed = (project.hardwareInstances ?? []).filter((i) => !i.connectionId);
+  return [...fromConnections, ...placed];
 }
 
 /** Единицы конкретной позиции фурнитуры (§86/§87). */

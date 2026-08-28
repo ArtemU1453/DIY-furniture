@@ -74,3 +74,57 @@ export {
   projectExploded, type AssemblyFrame, type AssemblyMode, type ExplodeOptions,
   type ExplodedTransform,
 } from './assembly';
+
+// ── Этап 32: каталог, параметрические виды, установленная фурнитура ─────────
+export {
+  HARDWARE_KINDS, HARDWARE_KIND_SPECS, KIND_CATEGORY, faceToWorld, kindOfHardware,
+  kindOfItem, kindSpec, placementOf, resolveHardwareItem,
+  HINGE_DEFAULTS, HANDLE_DEFAULTS, SLIDE_DEFAULTS, SHELF_PIN_DEFAULTS,
+  CONFIRMAT_DEFAULTS, CONNECTOR_DEFAULTS, DOWEL_DEFAULTS, MINIFIX_DEFAULTS,
+  HANDLE_POSITIONS, SLIDE_TYPES,
+  distributePoints, faceSize, handleAxis, handleCenter, hingeCount, hingePositions,
+  mergeParams, pinRowCount, pinRowPositions, slideMountingPoints,
+  type HandlePosition, type HardwareAnchor, type HardwareKindSpec, type ParametricContext,
+  type ParametricIssue, type ParametricResult, type SlideType, type TemplateOperation,
+} from './parametric';
+
+export {
+  BUILTIN_CATALOG_PRESETS, HARDWARE_CATALOG_VERSION, builtinCatalog, catalogKinds,
+  catalogManufacturers, createCustomEntry, duplicateEntry, favorites, filterCatalog,
+  findEntry, presetEntries, removeEntry, searchCatalog, toggleFavorite, updateEntry,
+  type CatalogFilter, type CustomHardwareInput, type HardwarePresetSet,
+} from './catalog';
+
+export {
+  HARDWARE_CATALOG_FILE, HARDWARE_CATALOG_FORMAT, exportCatalog, importCatalog,
+  mergeCatalog, migrateEntry, type CatalogImportResult, type HardwareCatalogFile,
+} from './catalogIo';
+
+export { loadCatalog, resetCatalog, saveCatalog } from './catalogStorage';
+
+export {
+  createItem, createSet, duplicateItem, findItem, hardwareOfItem, hideItem, isItemOverridden,
+  itemLayout, itemsOfPart, localPosition, lockItem, mirrorItem, moveItem, nextItemId,
+  nudgeItem, partOfItem, projectItems, projectSets, removalImpact, resetItem, setItems,
+  setQuantity, visibleItems, worldPosition,
+  type CreateItemInput, type RemovalImpact,
+} from './items';
+
+export {
+  MIN_HOLE_CLEARANCE, canPlaceItem, checkItem, checkItemConflicts, validateHardwareItems,
+  type HardwareItemIssue,
+} from './itemValidate';
+
+export {
+  hardwareItemReport, hardwareItemReportCsv, hardwareMachiningCsv, hardwareMachiningReport,
+  type HardwareMachiningRow, type HardwareReportRow,
+} from './itemReport';
+
+export {
+  diagramToSvg, installationDiagram, projectDiagrams,
+  type DiagramDimension, type DiagramHole, type InstallationDiagram,
+} from './diagram';
+
+export type {
+  HardwareCatalog, HardwareCatalogEntry, HardwareItem, HardwareKind, HardwareSet,
+} from '@/core/model/types';

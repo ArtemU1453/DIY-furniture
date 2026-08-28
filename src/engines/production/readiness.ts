@@ -10,6 +10,7 @@ import { allParts } from '@/core/model/selectors';
 import { runProductionCheck } from '@/engines/status';
 import { allOperations, validateMachining } from '@/engines/machining';
 import { isCuttingStale } from '@/engines/cutting';
+import { validateHardwareItems } from '@/engines/hardware';
 import type { ProductionPart } from './parts';
 
 /** Пункт чек-листа (§63). */
@@ -106,7 +107,13 @@ export function checkEdges(project: Project, parts: ProductionPart[]): Readiness
   return out;
 }
 
-/** Проверка фурнитуры (§73). */
+/**
+ * Проверка фурнитуры (§73).
+ *
+ * Проверяются и узлы, и фурнитура, поставленная на деталь напрямую (этап 32):
+ * её замечания уже посчитал валидатор фурнитуры — здесь они только переводятся
+ * в термины чек-листа, без второй проверки.
+ */
 export function checkHardware(project: Project): ReadinessIssue[] {
   const known = new Set(project.hardware.map((h) => String(h.id)));
   const out: ReadinessIssue[] = [];
@@ -119,6 +126,16 @@ export function checkHardware(project: Project): ReadinessIssue[] {
         target: { kind: 'SECTION', id: 'connections' },
       });
     }
+  }
+  for (const issue of validateHardwareItems(project)) {
+    out.push({
+      severity: issue.severity,
+      code: `production.hardware.${issue.code}`,
+      message: issue.message,
+      target: issue.partId
+        ? { kind: 'PART', id: issue.partId }
+        : { kind: 'SECTION', id: 'hardware' },
+    });
   }
   return out;
 }

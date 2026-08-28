@@ -10,6 +10,7 @@ import { allParts } from '@/core/model/selectors';
 import type { HardwareConnection, Project } from '@/core/model/types';
 import { canonicalCategory } from './validate';
 import { unitsOf } from './instances';
+import { resolveHardwareItem, resolveItemPart } from './parametric';
 
 /** Строка спецификации фурнитуры (§57). */
 export interface HardwareBomRow {
@@ -94,11 +95,19 @@ export function hardwareBom(project: Project): HardwareBomRow[] {
     else if (conn.status === 'WARNING' && row.status === 'VALID') row.status = 'WARNING';
   }
 
-  // §132: ручная фурнитура без соединения тоже попадает в спецификацию.
+  /* §132: ручная фурнитура без соединения тоже попадает в спецификацию.
+   * Количество берётся из раскладки вида (§69/§93): у петли на фасаде это
+   * число чашек, а не одна «единица» — иначе в спецификации не хватит петель. */
   for (const instance of project.hardwareInstances ?? []) {
     if (instance.connectionId) continue;
     const row = ensure(String(instance.hardwareId));
-    row.quantity += instance.quantity ?? 1;
+    const hardware = hardwareById.get(String(instance.hardwareId));
+    const part = resolveItemPart(allParts(project), instance);
+    const units = instance.quantity
+      ?? (hardware && part
+        ? Math.max(1, resolveHardwareItem(instance, hardware, part).anchors.length)
+        : 1);
+    row.quantity += units;
     if (!row.partIds.includes(String(instance.partId))) row.partIds.push(String(instance.partId));
   }
 
