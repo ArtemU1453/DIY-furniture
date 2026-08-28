@@ -69,6 +69,38 @@ import {
   type CabinetPreview,
 } from '@/engines/cabinet';
 import type { CabinetType } from '@/core/parametric/types';
+import {
+  DEFAULT_GIZMO,
+  DEFAULT_SNAP_3D,
+  EMPTY_MEASURE,
+  EMPTY_SELECTION,
+  clearSelection as clearSelectionPure,
+  dragDivider,
+  dragDoor,
+  dragDrawer,
+  dragShelf,
+  dragTargetOf,
+  indexOfPart,
+  measureClick,
+  normalizeBox3,
+  resetToFormula,
+  resizePart,
+  selectAll as selectAllPure,
+  selectChildren as selectChildrenPure,
+  selectInBox,
+  selectParent as selectParentPure,
+  selectSingle as selectSinglePure,
+  toggleSelection as toggleSelectionPure,
+  type DragOutcome,
+  type GizmoState,
+  type Guide3D,
+  type MeasurePoint,
+  type MeasureState,
+  type SelectionLevel,
+  type SelectionState as InteractionSelection,
+  type SizeField,
+  type SnapSettings3D,
+} from '@/engines/interaction';
 import { importHardwareLibrary, planPresetApplication } from '@/engines/hardware';
 import {
   applyEdgeConfiguration,
@@ -218,6 +250,32 @@ export interface CreateConnectionResult {
 }
 
 const HISTORY_LIMIT = 100;
+
+/** Инструмент интерактивного редактора (§126/§130). */
+export type InteractionTool =
+  | 'select' | 'move' | 'rotate' | 'resize' | 'dimension' | 'guide' | 'measure';
+
+/**
+ * Состояние интерактивного редактирования (§1/§96).
+ *
+ * Живёт в интерфейсе, а не в проекте: выделение, инструмент, привязки и
+ * направляющие не являются производственными данными. 2D и 3D читают ОДНО это
+ * состояние, поэтому показывают одно и то же выделение.
+ */
+export interface InteractionUiState {
+  selection: InteractionSelection;
+  tool: InteractionTool;
+  gizmo: GizmoState;
+  snap: SnapSettings3D;
+  guides: Guide3D[];
+  measure: MeasureState;
+  /** Показывать ограничения (§110). */
+  showConstraints: boolean;
+  /** Положение курсора в мире, мм (§131). */
+  cursor: { x: number; y: number; z: number } | null;
+  /** Открытая транзакция перетаскивания (§121/§122). */
+  transaction: { id: string; kind: string; label: string; steps: number } | null;
+}
 
 /** Ввод мастера создания шкафа (§90–§92). */
 export interface CreateCabinetInput {
@@ -396,6 +454,10 @@ export interface EditorState {
   /** Буфер копирования шкафа (§96): живёт в сессии, а не в проекте. */
   cabinetClipboard: string | null;
 
+  // ── Интерактивное редактирование (этап 29) ────────────────────────────────
+  /** Состояние интерактивного редактора: общее для 2D и 3D (§96). */
+  interaction: InteractionUiState;
+
   // ── Изделия ────────────────────────────────────────────────────────────────
   addFurniture: (name?: string) => void;
   removeFurniture: (id: Furniture['id']) => void;
@@ -454,6 +516,56 @@ export interface EditorState {
   removeCabinetPreset: (presetId: string) => boolean;
   /** Импортировать пресеты из JSON (§89). */
   importCabinetPresetsFile: (json: string) => { ok: boolean; added: number; errors: string[] };
+
+  // ── Интерактивное редактирование (этап 29) ────────────────────────────────
+  /** Активный инструмент (§126/§130). */
+  setInteractionTool: (tool: InteractionTool) => void;
+  /** Выбор объекта; additive — Ctrl/Cmd + click (§2/§3). */
+  selectEntity: (id: string | null, options?: { additive?: boolean }) => void;
+  /** Предварительная подсветка под курсором (§11). */
+  hoverEntity: (id: string | null) => void;
+  /** Ctrl/Cmd + A (§5). */
+  selectAllEntities: () => void;
+  /** Esc (§6). */
+  clearInteractionSelection: () => void;
+  /** Select Parent / Select Children (§8/§9). */
+  selectParentEntity: () => void;
+  selectChildrenEntities: () => void;
+  /** Уровень выбора: деталь, модуль или изделие (§7). */
+  setSelectionLevel: (level: SelectionLevel) => void;
+  /** Выделение объёмной рамкой (§4). */
+  boxSelectEntities: (
+    a: { x: number; y: number; z: number },
+    b: { x: number; y: number; z: number },
+    crossing?: boolean,
+  ) => string[];
+  /** Настройки гизмо и привязок (§12–§18, §111–§118). */
+  setGizmoState: (patch: Partial<GizmoState>) => void;
+  setSnapSettings: (patch: Partial<SnapSettings3D>) => void;
+  /** Направляющие (§58–§64). */
+  addInteractionGuide: (axis: Guide3D['axis'], position: number, label?: string) => string;
+  moveInteractionGuide: (id: string, position: number) => void;
+  removeInteractionGuide: (id: string) => void;
+  clearInteractionGuides: () => void;
+  /** Положение курсора для статус-бара (§131). */
+  setInteractionCursor: (point: { x: number; y: number; z: number } | null) => void;
+  /** Перетаскивание конструктивного элемента (§25–§32). */
+  dragConstructivePart: (partId: PartId, value: number) => DragOutcome;
+  /** Ручное изменение размера детали с Override (§19–§23). */
+  resizeSelectedPart: (partId: PartId, field: SizeField, value: number) => { ok: boolean; message?: string };
+  /** Вернуть расчётное значение (§24). */
+  resetPartFormula: (partId: PartId, fields?: SizeField[]) => void;
+  /** Блокировка положения и размера (§81/§82). */
+  setPartLock: (partId: PartId, patch: { position?: boolean; size?: boolean }) => void;
+  /** Инструмент измерения (§54–§57). */
+  setMeasureActive: (active: boolean) => void;
+  measureAt: (point: MeasurePoint) => MeasureState;
+  /** Показ ограничений (§110). */
+  toggleConstraintsVisible: () => void;
+  /** Транзакция перетаскивания: одна запись в истории (§121/§122). */
+  beginInteractionTransaction: (kind: string, label: string) => void;
+  endInteractionTransaction: () => void;
+  cancelInteractionTransaction: () => void;
 
   // ── Модули (этап 24) ──────────────────────────────────────────────────────
   /** Создать модуль из шаблона (§109). */
@@ -762,13 +874,38 @@ export const useEditorStore = create<EditorState>()(
     // Хэндл текущего расчёта раскроя (вне состояния — для отмены).
     let cuttingHandle: CuttingHandle | null = null;
 
-    /** Применить изменение модели с записью в историю. */
+    /* Снимок проекта на начало перетаскивания (§121). Держится вне состояния:
+     * это служебное значение операции, а не данные редактора. */
+    let transactionOrigin: Project | null = null;
+
+    /** Изделие, которому принадлежит деталь. */
+    const furnitureOfPartId = (project: Project, partId: string): string | null => {
+      for (const furniture of project.furnitures) {
+        for (const assembly of furniture.assemblies) {
+          if (assembly.parts.some((p) => String(p.id) === partId)) return String(furniture.id);
+        }
+      }
+      return null;
+    };
+
+    /**
+     * Применить изменение модели с записью в историю.
+     *
+     * Пока открыта транзакция (§121/§122 этапа 29), промежуточные изменения
+     * историю НЕ растят: перетаскивание порождает десятки шагов, а в undo
+     * должно попасть одно состояние — то, что было до начала операции. Его
+     * записывает endInteractionTransaction.
+     */
     const commit = (recipe: (project: Project) => void) => {
       const prev = get().project; // финализированный неизменяемый снимок
       set((state) => {
-        state.past.push(prev);
-        if (state.past.length > HISTORY_LIMIT) state.past.shift();
-        state.future = [];
+        if (transactionOrigin === null) {
+          state.past.push(prev);
+          if (state.past.length > HISTORY_LIMIT) state.past.shift();
+          state.future = [];
+        } else if (state.interaction.transaction) {
+          state.interaction.transaction.steps += 1;
+        }
         recipe(state.project);
         state.project.updatedAt = new Date().toISOString();
         state.saveState = 'unsaved';
@@ -801,6 +938,17 @@ export const useEditorStore = create<EditorState>()(
       activeFurnitureId: null,
       selectedConnectionId: null,
       cabinetClipboard: null,
+      interaction: {
+        selection: { ...EMPTY_SELECTION },
+        tool: 'select',
+        gizmo: { ...DEFAULT_GIZMO },
+        snap: { ...DEFAULT_SNAP_3D },
+        guides: [],
+        measure: { ...EMPTY_MEASURE },
+        showConstraints: false,
+        cursor: null,
+        transaction: null,
+      },
       selectedOperationId: null,
       selectedCuttingPieceId: null,
       cuttingRunning: false,
@@ -1448,6 +1596,213 @@ export const useEditorStore = create<EditorState>()(
           p.metadata = { ...(p.metadata ?? {}), [CABINET_PRESETS_KEY]: [...custom, ...fresh] };
         });
         return { ok: true, added: fresh.length, errors: result.errors };
+      },
+
+      // ── Интерактивное редактирование (этап 29) ──────────────────────────
+
+      setInteractionTool: (tool) => set((s) => {
+        s.interaction.tool = tool;
+        s.interaction.measure.active = tool === 'measure';
+        if (tool !== 'measure') { s.interaction.measure.from = null; }
+      }),
+
+      /* Выбор синхронизирован во всех видах (§96–§98): один список
+       * идентификаторов на 2D, 3D и панель свойств. */
+      selectEntity: (id, options = {}) => set((s) => {
+        const current = s.interaction.selection;
+        const next = id === null
+          ? clearSelectionPure(current)
+          : options.additive
+            ? toggleSelectionPure(current, id)
+            : selectSinglePure(current, id);
+        s.interaction.selection = next;
+        s.editor2d.selection = [...next.ids];
+        const active = next.ids[next.ids.length - 1] ?? null;
+        s.selectedPartId = (active && findPart(s.project, active as PartId) ? active : null) as PartId | null;
+      }),
+
+      hoverEntity: (id) => set((s) => void (s.interaction.selection.hovered = id)),
+
+      selectAllEntities: () => set((s) => {
+        const next = selectAllPure(s.project, s.interaction.selection, s.editor2d.hidden);
+        s.interaction.selection = next;
+        s.editor2d.selection = [...next.ids];
+      }),
+
+      clearInteractionSelection: () => set((s) => {
+        s.interaction.selection = clearSelectionPure(s.interaction.selection);
+        s.editor2d.selection = [];
+        s.selectedPartId = null;
+      }),
+
+      selectParentEntity: () => set((s) => {
+        const next = selectParentPure(s.project, s.interaction.selection);
+        s.interaction.selection = next;
+        s.editor2d.selection = [...next.ids];
+      }),
+
+      selectChildrenEntities: () => set((s) => {
+        const next = selectChildrenPure(s.project, s.interaction.selection);
+        s.interaction.selection = next;
+        s.editor2d.selection = [...next.ids];
+      }),
+
+      setSelectionLevel: (level) => set((s) => void (s.interaction.selection.level = level)),
+
+      boxSelectEntities: (a, b, crossing = true) => {
+        const state = get();
+        const ids = selectInBox(state.project, normalizeBox3(a, b), {
+          crossing,
+          hidden: state.editor2d.hidden,
+        });
+        set((s) => {
+          s.interaction.selection = { ...s.interaction.selection, ids };
+          s.editor2d.selection = [...ids];
+        });
+        return ids;
+      },
+
+      setGizmoState: (patch) => set((s) => void Object.assign(s.interaction.gizmo, patch)),
+      setSnapSettings: (patch) => set((s) => void Object.assign(s.interaction.snap, patch)),
+
+      addInteractionGuide: (axis, position, label) => {
+        const id = `guide-${axis}-${Math.round(position)}-${get().interaction.guides.length + 1}`;
+        set((s) => void s.interaction.guides.push({ id, axis, position, label }));
+        return id;
+      },
+
+      moveInteractionGuide: (id, position) => set((s) => {
+        const guide = s.interaction.guides.find((g) => g.id === id);
+        if (guide && !guide.locked) guide.position = position;
+      }),
+
+      removeInteractionGuide: (id) => set((s) => {
+        s.interaction.guides = s.interaction.guides.filter((g) => g.id !== id);
+      }),
+
+      clearInteractionGuides: () => set((s) => void (s.interaction.guides = [])),
+
+      setInteractionCursor: (point) => set((s) => void (s.interaction.cursor = point)),
+
+      /* Перетаскивание конструктивной детали меняет ПАРАМЕТР шкафа, а не
+       * координату детали (§25–§32): модель остаётся согласованной. */
+      dragConstructivePart: (partId, value) => {
+        const project = get().project;
+        const part = findPart(project, partId);
+        if (!part) {
+          return { ok: false, model: {} as never, description: '', refusal: { code: 'drag.noPart', message: 'Деталь не найдена.' } };
+        }
+        const furnitureId = furnitureOfPartId(project, String(part.id));
+        const furniture = furnitureId ? findFurniture(project, furnitureId as FurnitureId) : null;
+        if (!furniture) {
+          return { ok: false, model: {} as never, description: '', refusal: { code: 'drag.noCabinet', message: 'Изделие детали не найдено.' } };
+        }
+        const model = readParametricModel(furniture);
+        const index = indexOfPart(part);
+        const target = dragTargetOf(part);
+
+        let outcome: DragOutcome;
+        switch (target) {
+          case 'SHELF': outcome = dragShelf(model, index, value); break;
+          case 'DIVIDER': outcome = dragDivider(model, index, value); break;
+          case 'DRAWER': outcome = dragDrawer(model, index, value); break;
+          case 'DOOR': outcome = dragDoor(model, 'left', value - model.doors.gaps.leftGap); break;
+          default:
+            outcome = {
+              ok: false, model, description: '',
+              refusal: { code: 'drag.notConstructive', message: `Деталь «${part.name}» не управляется параметрами: перемещайте её как обычную деталь.` },
+            };
+        }
+        if (!outcome.ok) return outcome;
+
+        const applied = get().applyParametricModel(furniture.id, outcome.model);
+        if (!applied.ok) {
+          return { ...outcome, ok: false, refusal: { code: 'drag.rejected', message: applied.errors[0] ?? 'Пересчёт отклонён.' } };
+        }
+        return outcome;
+      },
+
+      /* Ручной размер детали (§19/§23): формула остаётся, значение получает
+       * Override и переживает пересчёт до сброса. */
+      resizeSelectedPart: (partId, field, value) => {
+        const part = findPart(get().project, partId);
+        if (!part) return { ok: false, message: 'Деталь не найдена.' };
+        const outcome = resizePart(part, field, value);
+        if (!outcome.ok) return { ok: false, message: outcome.refusal?.message };
+        get().setPartOverride(partId, outcome.override ?? {});
+        return { ok: true };
+      },
+
+      resetPartFormula: (partId, fields) => {
+        const part = findPart(get().project, partId);
+        if (!part) return;
+        const cleaned = resetToFormula(part, fields);
+        commit((p) => {
+          const target = findPart(p, partId);
+          if (target) target.metadata = cleaned.metadata;
+        });
+        const furnitureId = furnitureOfPartId(get().project, String(partId));
+        if (furnitureId) {
+          const furniture = findFurniture(get().project, furnitureId as FurnitureId);
+          if (furniture) get().applyParametricModel(furniture.id, readParametricModel(furniture));
+        }
+      },
+
+      setPartLock: (partId, patch) => commit((p) => {
+        const part = findPart(p, partId);
+        if (!part) return;
+        part.metadata = {
+          ...(part.metadata ?? {}),
+          ...(patch.position !== undefined ? { lockedPosition: patch.position } : {}),
+          ...(patch.size !== undefined ? { lockedSize: patch.size } : {}),
+        };
+      }),
+
+      setMeasureActive: (active) => set((s) => {
+        s.interaction.measure = { ...EMPTY_MEASURE, active };
+        if (active) s.interaction.tool = 'measure';
+      }),
+
+      measureAt: (point) => {
+        const next = measureClick(get().interaction.measure, point);
+        set((s) => void (s.interaction.measure = next));
+        return next;
+      },
+
+      toggleConstraintsVisible: () => set((s) => {
+        s.interaction.showConstraints = !s.interaction.showConstraints;
+      }),
+
+      /* Транзакция (§121/§122): промежуточные шаги перетаскивания меняют
+       * модель, но историю не растят — в неё попадает одно состояние начала. */
+      beginInteractionTransaction: (kind, label) => {
+        const origin = get().project;
+        transactionOrigin = origin;
+        set((s) => {
+          s.interaction.transaction = { id: `tx-${Date.now().toString(36)}`, kind, label, steps: 0 };
+        });
+      },
+
+      endInteractionTransaction: () => {
+        const origin = transactionOrigin;
+        transactionOrigin = null;
+        set((s) => {
+          if (origin && s.interaction.transaction && s.interaction.transaction.steps > 0) {
+            s.past.push(origin);
+            if (s.past.length > HISTORY_LIMIT) s.past.shift();
+            s.future = [];
+          }
+          s.interaction.transaction = null;
+        });
+      },
+
+      cancelInteractionTransaction: () => {
+        const origin = transactionOrigin;
+        transactionOrigin = null;
+        set((s) => {
+          if (origin) s.project = origin;
+          s.interaction.transaction = null;
+        });
       },
 
       createModuleFromTemplate: (templateId, name) => {
