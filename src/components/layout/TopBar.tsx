@@ -46,12 +46,12 @@ export function TopBar({ onOpenProjects, onOpenSettings, onNewProject, setStatus
   return (
     <div className="top-bar">
       <span className="brand">Karkas</span>
-      <button onClick={onNewProject}>Новый</button>
-      <button onClick={onOpenProjects}>Открыть</button>
-      <button onClick={handleSave}>Сохранить</button>
+      <button onClick={onNewProject} title="Новый проект">Новый</button>
+      <button onClick={onOpenProjects} title="Открыть сохранённый проект">Открыть</button>
+      <button onClick={handleSave} title="Сохранить локально (Ctrl+S)">Сохранить</button>
       <span className="sep" />
-      <button onClick={() => fileInputRef.current?.click()}>Импорт</button>
-      <button onClick={handleExport}>Экспорт</button>
+      <button onClick={() => fileInputRef.current?.click()} title="Загрузить проект из файла JSON">Импорт</button>
+      <button onClick={handleExport} title="Сохранить проект в файл JSON">Экспорт</button>
       <input
         ref={fileInputRef}
         type="file"
@@ -64,10 +64,10 @@ export function TopBar({ onOpenProjects, onOpenSettings, onNewProject, setStatus
         }}
       />
       <span className="sep" />
-      <button onClick={undo} disabled={!canUndo} title="Отменить">
+      <button onClick={undo} disabled={!canUndo} title="Отменить последнее действие (Ctrl+Z)">
         ↶ Отменить
       </button>
-      <button onClick={redo} disabled={!canRedo} title="Повторить">
+      <button onClick={redo} disabled={!canRedo} title="Повторить отменённое (Ctrl+Shift+Z)">
         ↷ Повторить
       </button>
       <span className="sep" />

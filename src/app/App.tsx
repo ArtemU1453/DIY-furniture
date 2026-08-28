@@ -4,6 +4,8 @@ import { TopBar } from '@/components/layout/TopBar';
 import { LeftPanel, type NavSection } from '@/components/layout/LeftPanel';
 import { RightPanel } from '@/components/layout/RightPanel';
 import { StatusBar } from '@/components/layout/StatusBar';
+import { ErrorBoundary } from '@/components/layout/ErrorBoundary';
+import { EmptyProject } from '@/components/panels/EmptyProject';
 import { ProjectsDialog } from '@/components/panels/ProjectsDialog';
 import { SettingsDialog } from '@/components/panels/SettingsDialog';
 import { CreateFurnitureDialog } from '@/components/panels/CreateFurnitureDialog';
@@ -39,6 +41,31 @@ import { saveCurrentProject } from '@/features/project/projectActions';
 
 type CenterView = '3d' | 'editor2d' | 'interactive' | 'cabinet' | 'cuttingPrep' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'productionCenter' | 'modules' | 'hardwareCatalog' | 'viewer3d';
 type ViewMode = '3d' | '2d' | 'split';
+
+/** Разделы центральной области и их подписи (один список на вкладки и заголовки). */
+const CENTER_VIEWS: Array<[CenterView, string]> = [
+  ['3d', '3D'],
+  ['editor2d', '2D-редактор'],
+  ['table', 'Детали'],
+  ['materials', 'Материалы'],
+  ['hardware', 'Фурнитура'],
+  ['connections', 'Соединения'],
+  ['machining', 'Присадка'],
+  ['cutting', 'Раскрой'],
+  ['cuttingPrep', 'Подготовка'],
+  ['interactive', 'Редактор'],
+  ['cabinet', 'Шкаф'],
+  ['modules', 'Модули'],
+  ['parametric', 'Параметры'],
+  ['production', 'Производство'],
+  ['productionCenter', 'Цех'],
+  ['hardwareCatalog', 'Каталог фурнитуры'],
+  ['viewer3d', '3D-редактор'],
+  ['documents', 'Документы'],
+  ['library', 'Библиотека'],
+];
+
+const CENTER_VIEW_LABELS = Object.fromEntries(CENTER_VIEWS) as Record<CenterView, string>;
 
 export function App() {
   const [status, setStatus] = useState('');
@@ -113,7 +140,10 @@ export function App() {
       }
       if (!typing && (e.key === 'Delete' || e.key === 'Backspace') && s.selectedPartId) {
         e.preventDefault();
+        const part = allParts(s.project).find((p) => String(p.id) === String(s.selectedPartId));
         s.removePart(s.selectedPartId);
+        // Безопасное удаление: видно, ЧТО удалено и как вернуть (§«undo»).
+        setStatus(`Удалена деталь «${part?.name ?? '—'}». Ctrl+Z — отменить.`);
         return;
       }
       if (e.key === 'Escape') { s.selectPart(null); s.selectOperation(null); s.selectConnection(null); s.selectCuttingPiece(null); return; }
@@ -145,29 +175,7 @@ export function App() {
       />
       <div className="center-area">
         <div className="center-tabs">
-          {(
-            [
-              ['3d', '3D'],
-              ['editor2d', '2D-редактор'],
-              ['table', 'Детали'],
-              ['materials', 'Материалы'],
-              ['hardware', 'Фурнитура'],
-              ['connections', 'Соединения'],
-              ['machining', 'Присадка'],
-              ['cutting', 'Раскрой'],
-              ['cuttingPrep', 'Подготовка'],
-              ['interactive', 'Редактор'],
-              ['cabinet', 'Шкаф'],
-              ['modules', 'Модули'],
-              ['parametric', 'Параметры'],
-              ['production', 'Производство'],
-              ['productionCenter', 'Цех'],
-              ['hardwareCatalog', 'Каталог фурнитуры'],
-              ['viewer3d', '3D-редактор'],
-              ['documents', 'Документы'],
-              ['library', 'Библиотека'],
-            ] as Array<[CenterView, string]>
-          ).map(([v, label]) => (
+          {CENTER_VIEWS.map(([v, label]) => (
             <button key={v} className={centerView === v ? 'active' : ''} onClick={() => setCenterView(v)}>
               {label}
             </button>
@@ -214,8 +222,18 @@ export function App() {
             </>
           )}
         </div>
+        {/* Сбой раздела не должен обнулять приложение: key сбрасывает границу
+            при переходе в другой раздел (этап 35). */}
+        <ErrorBoundary key={centerView} title={CENTER_VIEW_LABELS[centerView]}>
         <div className="center-body">
-          {centerView === '3d' && (
+          {/* Первый экран пустого проекта: понятный следующий шаг (этап 35). */}
+          {centerView === '3d' && allParts(project).length === 0 ? (
+            <EmptyProject
+              onCreateFurniture={() => setCreateOpen(true)}
+              onOpenCabinetDesigner={() => setCenterView('cabinet')}
+            />
+          ) : null}
+          {centerView === '3d' && allParts(project).length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', minHeight: 0 }}>
               <EditorToolbar
                 onSetView={(v) => cameraRef.current?.setView(v)}
@@ -322,6 +340,7 @@ export function App() {
             />
           )}
         </div>
+        </ErrorBoundary>
       </div>
       <RightPanel />
       <StatusBar status={status} />
