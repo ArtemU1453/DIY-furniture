@@ -383,6 +383,28 @@ describe('Присадка 23 — инструменты и станок', () =>
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Копия проекта с заведомо негодной операцией на детали: модель такие данные
+ * не принимает, но они могут прийти из файла — валидатор обязан их находить.
+ */
+function brokenProjectWithOperation(
+  partId: string,
+  op: { diameter: number; depth: number; through: boolean },
+) {
+  const broken = structuredClone(project());
+  const part = broken.furnitures
+    .flatMap((f) => f.assemblies)
+    .flatMap((a) => a.parts)
+    .find((p) => String(p.id) === String(partId))!;
+  part.machining.push({
+    id: `broken-${part.machining.length}` as never,
+    type: 'drilling', partId: part.id, face: 'front',
+    x: 100, y: 100, z: 0,
+    diameter: op.diameter, depth: op.depth, through: op.through, origin: 'manual',
+  });
+  return broken;
+}
+
 describe('Присадка 23 — валидация', () => {
   it('Тест 15/47: корректная операция замечаний не даёт', () => {
     const id = makePart(600, 400, 16);
@@ -405,9 +427,10 @@ describe('Присадка 23 — валидация', () => {
 
   it('Тест 17/48/104: глубина больше толщины у глухого → ERROR', () => {
     const id = makePart(600, 400, 16);
-    store().addManualOperation({ partId: id, face: 'front', x: 100, y: 100, diameter: 8, depth: 20, through: false });
-    const report = validateProjectMachining(project());
-    expect(report.errors).toBeGreaterThan(0);
+    // Модель такую операцию не принимает (этап 38) — портим копию проекта,
+    // как если бы она пришла из файла.
+    const broken = brokenProjectWithOperation(id, { diameter: 8, depth: 20, through: false });
+    expect(validateProjectMachining(broken).errors).toBeGreaterThan(0);
 
     // Сквозное отверстие той же глубины ошибкой не является.
     const clean = makePart(600, 400, 16);
@@ -417,8 +440,9 @@ describe('Присадка 23 — валидация', () => {
 
   it('Тест 15/47: нулевой диаметр и глубина — ошибка', () => {
     const id = makePart();
-    store().addManualOperation({ partId: id, face: 'front', x: 10, y: 10, diameter: 0, depth: 10 });
-    expect(validateProjectMachining(project()).errors).toBeGreaterThan(0);
+    // Через модель нулевой диаметр не проходит (этап 38); проверяем данные из файла.
+    const broken = brokenProjectWithOperation(id, { diameter: 0, depth: 10, through: false });
+    expect(validateProjectMachining(broken).errors).toBeGreaterThan(0);
   });
 
   it('Тест 15/95: отчёт различает годные операции и проблемные', () => {

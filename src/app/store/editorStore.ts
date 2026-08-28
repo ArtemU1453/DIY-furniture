@@ -200,6 +200,7 @@ import {
 import {
   pruneDeadConnections,
   reconcileConnections,
+  validateOperation,
 } from '@/engines/connections';
 import { validatePartChange } from '@/engines/viewer';
 import { constructionMounts, constructionOf } from '@/core/parametric/types';
@@ -1846,9 +1847,14 @@ export const useEditorStore = create<EditorState>()(
       pasteCabinetFromClipboard: (json, name) => {
         const source = json ?? get().cabinetClipboard;
         if (!source) return null;
-        const copy = pasteCabinetPure(source, name);
+        const copy = pasteCabinetPure(get().project, source, name);
         if (!copy) return null;
         commit((p) => {
+          /* Материалы и кромка вставленного шкафа должны существовать в этом
+           * проекте, иначе детали остались бы без материала (этап 38). */
+          for (const material of copy.materials ?? []) p.materials.push(material);
+          for (const edge of copy.edges ?? []) p.edges.push(edge);
+          for (const item of copy.hardware ?? []) p.hardware.push(item);
           p.furnitures.push(copy.furniture);
           p.hardwareConnections = [...p.hardwareConnections, ...copy.connections];
         });
@@ -3059,9 +3065,18 @@ export const useEditorStore = create<EditorState>()(
           through: input.through ?? false,
           origin: 'manual',
         };
+        /* Невозможная присадка в модель не попадает (этап 38): нулевой
+         * диаметр или глубина глубже материала ушли бы в карту детали и на
+         * станок. Проверка та же, что и у валидатора операций, — второй
+         * системы правил не появляется. */
+        const part = findPart(get().project, input.partId);
+        if (!part) return op.id;
+        const issues = validateOperation(op, part).filter((i) => i.severity === 'error');
+        if (issues.length > 0) return op.id;
+
         commit((p) => {
-          const part = findPart(p, input.partId);
-          if (part) part.machining.push(op);
+          const target = findPart(p, input.partId);
+          if (target) target.machining.push(op);
         });
         return op.id;
       },
