@@ -20,6 +20,8 @@ export const STANDARD_SHEET_SIZES: Array<{ name: string; height: Mm; width: Mm }
   { name: '2750 × 1830', height: 2750, width: 1830 },
   { name: '2800 × 2070', height: 2800, width: 2070 },
   { name: '2440 × 1830', height: 2440, width: 1830 },
+  { name: '2440 × 1220', height: 2440, width: 1220 },
+  { name: '3050 × 2070', height: 3050, width: 2070 },
   { name: '3050 × 1830', height: 3050, width: 1830 },
   { name: '2500 × 1250', height: 2500, width: 1250 },
 ];

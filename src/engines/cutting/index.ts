@@ -106,3 +106,131 @@ export type {
   TrimSettings,
   PieceRotation,
 } from '@/core/model/types';
+
+// ── Этап 30: подготовка деталей к раскрою ────────────────────────────────────
+export {
+  DEFAULT_LEFTOVER_LIMITS,
+  classifyLeftover,
+  fitsLeftover,
+  fromStoredRemnant,
+  harvestLeftovers,
+  leftoverOf,
+  leftoverSummary,
+  leftoversOfResult,
+  limitsOf,
+  pickLeftover,
+  projectLeftovers,
+  reuseOrder,
+  toStoredRemnant,
+  type LeftoverLimits,
+  type LeftoverMatchRequest,
+  type LeftoverSummary,
+} from './leftovers';
+
+export {
+  availableSheets,
+  consumedRemnantIds,
+  freeQuantity,
+  markRemnantsUsed,
+  releaseJob,
+  reserveForJob,
+  reservationSummary,
+  type ReservationRequest,
+  type ReservationResult,
+  type ReservationSummary,
+} from './reservation';
+
+export {
+  applyManualPlacement,
+  checkManualPlacement,
+  freezeExcept,
+  isFrozen,
+  lockPlacement,
+  lockSheet,
+  orientedSize,
+  unlockPlacements,
+  upsertPlacement,
+  usableRect,
+  type ManualPlacementCheck,
+  type ManualPlacementIssue,
+  type ManualPlacementOutcome,
+  type ManualPlacementRequest,
+} from './manual';
+
+export {
+  cutFrames,
+  cutSummary,
+  isThroughCut,
+  orderCuts,
+  orderPlacements,
+  type CutFrame,
+  type CutSummary,
+  type OrderedCut,
+} from './sequence';
+
+export {
+  buildCuttingQueue,
+  cuttingCost,
+  moveQueueItem,
+  projectCuttingCost,
+  queueKey,
+  queueOrder,
+  type CuttingCost,
+  type CuttingQueueItem,
+} from './queue';
+
+export {
+  consistencyErrors,
+  cuttingErrors,
+  noFitMessage,
+  placementErrors,
+  projectCuttingErrors,
+  summarizeErrors,
+  unplacedErrors,
+  type CuttingErrorCode,
+  type CuttingErrorItem,
+  type CuttingErrorSummary,
+} from './errors';
+
+export {
+  CUTTING_JOB_FORMAT,
+  CUTTING_JOB_VERSION,
+  applyRebuild,
+  bumpVersion,
+  enrichJob,
+  exportCuttingJobs,
+  importCuttingJobs,
+  isJobDirty,
+  jobStatus,
+  jobVersion,
+  markJobsDirty,
+  readCuttingJob,
+  type CuttingJobFile,
+  type CuttingJobImport,
+  type RebuildOutcome,
+} from './jobIo';
+
+export {
+  dxfExporter,
+  getCuttingExporter,
+  listCuttingExporters,
+  registerCuttingExporter,
+  resultToDxf,
+  sheetToDxf,
+  type CuttingExporter,
+} from './dxf';
+
+export {
+  cuttingReport,
+  leftoverTableCsv,
+  reportSection,
+  reportToCsvRows,
+  reportTotals,
+  type CuttingReportHeader,
+  type CuttingReportPart,
+  type CuttingReportSection,
+  type CuttingReportSheet,
+  type CuttingReportTotals,
+} from './report';
+
+export type { LeftoverSheet, LeftoverStatus } from '@/core/model/types';
