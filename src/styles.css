@@ -96,6 +96,14 @@ select:focus {
   padding: 6px 8px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
+  /* Разделов много: строка переносится, иначе последние вкладки уезжают под
+     правую панель и до них нельзя дотянуться мышью. */
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.center-tabs button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .center-tabs button.active {
   border-color: var(--accent);

@@ -13,7 +13,7 @@
  * полок, перегородок, фасадов, ножек и цоколя.
  */
 import type { MaterialId } from '@/core/model/ids';
-import type { Mm, Vec3, Rotation, PartRole } from '@/core/model/types';
+import type { MachiningOperation, Mm, Vec3, Rotation, PartRole } from '@/core/model/types';
 
 // ── Параметры (§7/§8) ────────────────────────────────────────────────────────
 
@@ -77,6 +77,9 @@ export type CabinetConstructionType = 'BETWEEN_SIDES' | 'ON_SIDES';
 /** AUTO_EQUAL — равномерно между верхом и низом; MANUAL — по заданным высотам. */
 export type ShelfDistribution = 'AUTO_EQUAL' | 'MANUAL';
 
+/** Фиксированная или регулируемая полка (§14 этапа 28). */
+export type ShelfMode = 'FIXED' | 'ADJUSTABLE';
+
 /** Полка, положение которой пользователь задал явно. */
 export interface FixedShelf {
   /** Порядковый номер полки, начиная с 1. */
@@ -100,6 +103,11 @@ export interface ShelfSettings {
   fixedShelves: FixedShelf[];
   /** Насколько полка мельче корпуса по глубине. */
   depthReduction: Mm;
+  /**
+   * Полка вклеена/закреплена в корпус (FIXED) или лежит на полкодержателях
+   * (ADJUSTABLE, §14 этапа 28). Не задано — регулируемая.
+   */
+  mode?: ShelfMode;
 }
 
 export const DEFAULT_SHELVES: ShelfSettings = {
@@ -150,12 +158,40 @@ export const DEFAULT_DOOR_GAPS: DoorGapSettings = {
 
 export type DoorOpening = 'left' | 'right' | 'double';
 
+/**
+ * Как фасад стоит относительно корпуса (§35 этапа 28).
+ *
+ * FULL — полное наложение: фасад закрывает торцы боковин целиком;
+ * HALF — половинное: фасад закрывает половину торца (два фасада делят боковину);
+ * INSET — вкладной: фасад утоплен В проём между боковинами.
+ */
+export type DoorOverlay = 'FULL' | 'HALF' | 'INSET';
+
+/** Тип фасада (§33 этапа 28). */
+export type DoorKind = 'single' | 'double';
+
+/** Ручка фасада (§39/§40 этапа 28). */
+export interface HandleSettings {
+  /** Отступ ручки от кромки фасада, мм. */
+  edgeOffset: Mm;
+  /** Положение ручки по высоте фасада. */
+  position: 'TOP' | 'CENTER' | 'BOTTOM';
+}
+
+export const DEFAULT_HANDLE: HandleSettings = { edgeOffset: 50, position: 'TOP' };
+
 export interface DoorSettings {
   count: number;
   gaps: DoorGapSettings;
   opening: DoorOpening;
   handleEnabled: boolean;
   material: MaterialId | null;
+  /** Наложение фасада; не задано — полное. */
+  overlay?: DoorOverlay;
+  /** Одностворчатый или двустворчатый фасад. */
+  kind?: DoorKind;
+  /** Параметры ручки. */
+  handle?: HandleSettings;
 }
 
 export const DEFAULT_DOORS: DoorSettings = {
@@ -176,6 +212,13 @@ export interface BackPanelSettings {
   /** Отступ вкладной стенки от заднего торца. */
   offset: Mm;
   material: MaterialId | null;
+  /**
+   * Глубина паза под стенку (§23 этапа 28). Поле необязательное: проекты
+   * прошлых этапов его не знают, и тогда работает DEFAULT_GROOVE_DEPTH.
+   */
+  grooveDepth?: Mm;
+  /** Отступ паза от заднего торца детали. */
+  grooveOffset?: Mm;
 }
 
 export const DEFAULT_BACK: BackPanelSettings = {
@@ -187,6 +230,9 @@ export const DEFAULT_BACK: BackPanelSettings = {
 
 // ── Ножки и цоколь (§34/§35) ─────────────────────────────────────────────────
 
+/** Схема расстановки опор (§30 этапа 28). */
+export type LegPlacement = 'CORNERS' | 'INSET' | 'SYMMETRIC';
+
 export interface LegSettings {
   enabled: boolean;
   height: Mm;
@@ -195,6 +241,8 @@ export interface LegSettings {
   /** Отступ ножки от передней/задней грани. */
   insetY: Mm;
   count: number;
+  /** Схема расстановки; не задана — по углам. */
+  placement?: LegPlacement;
 }
 
 export const DEFAULT_LEGS: LegSettings = {
@@ -208,11 +256,13 @@ export const DEFAULT_LEGS: LegSettings = {
 export interface PlinthSettings {
   enabled: boolean;
   height: Mm;
-  /** Утопление цоколя внутрь корпуса по бокам. */
+  /** Утопление цоколя внутрь корпуса по бокам (recess, §27 этапа 28). */
   inset: Mm;
   /** Отступ передней плоскости цоколя от переднего торца. */
   frontOffset: Mm;
   material: MaterialId | null;
+  /** Толщина планки цоколя; не задана — берётся толщина корпуса. */
+  thickness?: Mm;
 }
 
 export const DEFAULT_PLINTH: PlinthSettings = {
@@ -225,16 +275,62 @@ export const DEFAULT_PLINTH: PlinthSettings = {
 
 // ── Ящики (заготовка, §3) ────────────────────────────────────────────────────
 
+/** Как распределяются ящики по проёму (§43 этапа 28). */
+export type DrawerDistribution = 'AUTO_EQUAL' | 'MANUAL' | 'PARAMETRIC';
+
 export interface DrawerSettings {
   count: number;
   /** Высота фронта ящика; 0 — делить проём поровну. */
   frontHeight: Mm;
   gap: Mm;
+  /** Способ расстановки; не задан — равномерно. */
+  distribution?: DrawerDistribution;
+  /** Явные высоты фронтов от низа проёма (для MANUAL). */
+  positions?: Mm[];
+  /** Толщина боковин и задней стенки короба ящика. */
+  sideThickness?: Mm;
+  /** Толщина дна ящика. */
+  bottomThickness?: Mm;
+  /** Длина направляющей, мм. 0 — подобрать по глубине корпуса. */
+  slideLength?: Mm;
+  /** Боковой зазор между коробом и стенкой секции (на направляющую). */
+  sideClearance?: Mm;
+  /** Материал фронтов; не задан — материал фасадов или корпуса. */
+  material?: MaterialId | null;
 }
 
 export const DEFAULT_DRAWERS: DrawerSettings = { count: 0, frontHeight: 0, gap: 3 };
 
 // ── Параметрическая модель изделия (§3) ──────────────────────────────────────
+
+// ── Кромка (§4 этапа 28) ─────────────────────────────────────────────────────
+
+/**
+ * Параметры кромки корпуса. Сама кромка деталей остаётся в Part.edges и
+ * считается движком edges этапа 21 — здесь только значения по умолчанию,
+ * которыми параметрический корпус их заполняет.
+ */
+export interface EdgeSettings {
+  thickness: Mm;
+  materialId: string | null;
+}
+
+export const DEFAULT_EDGE: EdgeSettings = { thickness: 0.4, materialId: null };
+
+// ── Тип шкафа (§5 этапа 28) ──────────────────────────────────────────────────
+
+/**
+ * Тип корпусного изделия. Это НЕ второй перечень видов мебели: каждый тип
+ * отображается на существующий FurnitureKind (KIND_OF_CABINET_TYPE в
+ * engines/cabinet/model.ts), а правила остаются одни и те же.
+ */
+export type CabinetType =
+  | 'CABINET'
+  | 'WARDROBE'
+  | 'BASE_UNIT'
+  | 'WALL_UNIT'
+  | 'TALL_UNIT'
+  | 'SHELF_UNIT';
 
 /**
  * Тип изделия/модуля (§3). SHELVING сохранён с этапа 18 как синоним
@@ -272,6 +368,14 @@ export interface ParametricModel {
   parameters: Parameter[];
   /** Тип корпусного соединения. */
   jointType: 'confirmat' | 'dowel' | 'minifix';
+  /**
+   * Тип корпуса (§5 этапа 28). Не задан — выводится из kind, поэтому проекты
+   * прошлых этапов открываются без миграции.
+   */
+  cabinetType?: CabinetType;
+  /** Материал и толщина кромки по умолчанию (§4 этапа 28). */
+  edge?: EdgeSettings;
+  /** Толщина корпусного материала для задней стенки задаётся в backPanel. */
 }
 
 export function createParametricModel(patch: Partial<ParametricModel> = {}): ParametricModel {
@@ -316,6 +420,12 @@ export interface PartDefinition {
   materialId: MaterialId | null;
   role: ParametricPartRole;
   metadata?: Record<string, unknown>;
+  /**
+   * Конструктивная присадка детали (§25/§48 этапа 28): паз под заднюю стенку,
+   * паз под дно ящика. Это не второй список операций — генератор кладёт их в
+   * Part.machining рядом с ручными, помечая source: PARAMETRIC_RULE.
+   */
+  machining?: MachiningOperation[];
 }
 
 /** Роли параметрических деталей (§16). */

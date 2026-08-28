@@ -17,7 +17,7 @@
  * оно записывается в metadata.overrides и переживает пересчёт, пока его не
  * сбросят. Остальные поля считает правило.
  */
-import type { Part } from '@/core/model/types';
+import type { MachiningOperation, Part } from '@/core/model/types';
 import { newPartId } from '@/core/model/ids';
 import type {
   ParametricModel,
@@ -73,10 +73,26 @@ export function hasOverride(part: Part): boolean {
   return Object.keys(partOverrides(part)).length > 0;
 }
 
+/**
+ * Конструктивная операция присадки (§25/§48 этапа 28): порождена
+ * параметрическим правилом, а не фурнитурой и не пользователем. Такие операции
+ * пересчитываются вместе с деталью, поэтому старые снимаются перед записью
+ * новых, а ручные остаются нетронутыми.
+ */
+export function isConstructionOperation(op: MachiningOperation): boolean {
+  return String(op.id).startsWith('cab:');
+}
+
+/** Привязать конструктивные операции определения к идентификатору детали. */
+function constructionOps(def: PartDefinition, partId: Part['id']): MachiningOperation[] {
+  return (def.machining ?? []).map((op) => ({ ...op, partId }));
+}
+
 /** Определение → деталь ProjectModel. */
 function definitionToPart(def: PartDefinition, number: number): Part {
+  const id = newPartId();
   return {
-    id: newPartId(),
+    id,
     name: def.name,
     role: ROLE_TO_PART_ROLE[def.role],
     width: def.width,
@@ -88,7 +104,6 @@ function definitionToPart(def: PartDefinition, number: number): Part {
     edges: { left: null, right: null, top: null, bottom: null },
     position: def.position,
     rotation: def.rotation,
-    machining: [],
     metadata: {
       ...def.metadata,
       key: def.id,
@@ -96,6 +111,7 @@ function definitionToPart(def: PartDefinition, number: number): Part {
       number: pad(number),
       parametricRole: def.role,
     },
+    machining: constructionOps(def, id),
   };
 }
 
@@ -148,7 +164,12 @@ export function generateParts(model: ParametricModel, existing: Part[] = []): Ge
       ...definitionToPart(def, numberOf(prev) || ++maxNumber),
       id: prev.id,
       edges: prev.edges,
-      machining: prev.machining, // ручные операции переживают пересчёт
+      /* Ручные операции переживают пересчёт, конструктивные пересчитываются:
+       * паз под заднюю стенку обязан поехать вместе с деталью (§25/§60). */
+      machining: [
+        ...constructionOps(def, prev.id),
+        ...prev.machining.filter((op) => !isConstructionOperation(op)),
+      ],
       quantity: prev.quantity,
       grain: prev.grain,
       metadata: {

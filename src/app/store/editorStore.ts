@@ -23,8 +23,6 @@ import {
   newMachiningId,
   newMaterialId,
   newPartId,
-  newFurnitureId,
-  newAssemblyId,
 } from '@/core/model/ids';
 import {
   PARAMETRIC_KEY,
@@ -46,6 +44,31 @@ import {
   type ParametricModel,
   type PartOverride,
 } from '@/engines/parametric';
+import {
+  buildCabinet as buildCabinetPure,
+  cabinetBom,
+  cabinetRemovalImpact,
+  checkCabinet,
+  copyCabinet as copyCabinetPure,
+  createCabinetModel,
+  duplicateFurnitureData,
+  findCabinetPreset,
+  importCabinetPresets as importCabinetPresetsPure,
+  modelFromPreset,
+  pasteCabinet as pasteCabinetPure,
+  presetFromModel,
+  previewCabinet,
+  regenerateCabinet,
+  removeCabinet as removeCabinetPure,
+  toCabinetModel,
+  CABINET_PRESETS_KEY,
+  type CabinetBom,
+  type CabinetCheck,
+  type CabinetModel,
+  type CabinetPreset,
+  type CabinetPreview,
+} from '@/engines/cabinet';
+import type { CabinetType } from '@/core/parametric/types';
 import { importHardwareLibrary, planPresetApplication } from '@/engines/hardware';
 import {
   applyEdgeConfiguration,
@@ -196,6 +219,48 @@ export interface CreateConnectionResult {
 
 const HISTORY_LIMIT = 100;
 
+/** Ввод мастера создания шкафа (§90–§92). */
+export interface CreateCabinetInput {
+  type?: CabinetType;
+  presetId?: string;
+  name?: string;
+  width?: number;
+  height?: number;
+  depth?: number;
+  thickness?: number;
+  materialId?: MaterialId | null;
+  construction?: ParametricModel['construction'];
+}
+
+/**
+ * Модель шкафа по вводу мастера (§91/§92). Пресет даёт стартовые значения,
+ * явно указанные габариты и материал их перекрывают, а материал корпуса
+ * подставляет свою толщину — как и в остальном редакторе.
+ */
+function cabinetModelFromInput(project: Project, input: CreateCabinetInput): CabinetModel | null {
+  const preset = input.presetId ? findCabinetPreset(project, input.presetId) : undefined;
+  if (input.presetId && !preset) return null;
+
+  const base = preset
+    ? modelFromPreset(preset)
+    : createCabinetModel(input.type ?? 'CABINET');
+
+  const material = input.materialId !== undefined
+    ? project.materials.find((m) => String(m.id) === String(input.materialId))
+    : (project.materials.find((m) => m.kind === 'ldsp') ?? project.materials[0]);
+
+  return toCabinetModel({
+    ...base,
+    ...(input.type ? { cabinetType: input.type } : {}),
+    ...(input.width != null ? { width: input.width } : {}),
+    ...(input.height != null ? { height: input.height } : {}),
+    ...(input.depth != null ? { depth: input.depth } : {}),
+    ...(input.construction ? { construction: input.construction } : {}),
+    materialId: material?.id ?? base.materialId,
+    thickness: input.thickness ?? material?.thickness ?? base.thickness,
+  });
+}
+
 /** Итог применения параметрической модели (§37/§67/§69). */
 export interface ParametricApplyResult {
   ok: boolean;
@@ -328,6 +393,9 @@ export interface EditorState {
   setProjectName: (name: string) => void;
   updateSettings: (patch: Partial<ProjectSettings>) => void;
 
+  /** Буфер копирования шкафа (§96): живёт в сессии, а не в проекте. */
+  cabinetClipboard: string | null;
+
   // ── Изделия ────────────────────────────────────────────────────────────────
   addFurniture: (name?: string) => void;
   removeFurniture: (id: Furniture['id']) => void;
@@ -350,6 +418,42 @@ export interface EditorState {
   ) => ParametricApplyResult;
   /** Создать изделие из параметрического шаблона (§58–§60). */
   createParametricFurniture: (templateId: string, name?: string) => FurnitureId | null;
+
+  // ── Генератор корпусной мебели (этап 28) ──────────────────────────────────
+  /** Модель шкафа со всеми заполненными блоками (§1). */
+  getCabinetModel: (id: FurnitureId) => CabinetModel | null;
+  /** Создать шкаф: тип, габариты, материал, пресет (§90–§94). */
+  createParametricCabinet: (input: CreateCabinetInput) => FurnitureId | null;
+  /** Сводка будущего шкафа до его создания (§93). */
+  previewParametricCabinet: (input: CreateCabinetInput) => CabinetPreview | null;
+  /** Изменить несколько параметров одной транзакцией undo (§117). */
+  applyCabinetPatch: (
+    id: FurnitureId,
+    patch: Partial<ParametricModel>,
+    description?: string,
+  ) => ParametricApplyResult;
+  /** Проверка конструкции: пересечения и зазоры (§79–§85). */
+  checkCabinetConstruction: (id: FurnitureId) => CabinetCheck | null;
+  /** Ведомость деталей и фурнитуры (§108–§114). */
+  getCabinetBom: (id?: FurnitureId) => CabinetBom;
+  /** Распределить полки равномерно (§18/§21). */
+  distributeShelvesEqually: (id: FurnitureId) => ParametricApplyResult;
+  /** Задать положение одной полки вручную (§19/§20). */
+  setShelfPosition: (id: FurnitureId, index: number, offset: number) => ParametricApplyResult;
+  /** Вернуть полку под автоматический расчёт (§21). */
+  resetShelfPosition: (id: FurnitureId, index: number) => ParametricApplyResult;
+  /** Скопировать шкаф в буфер (§96). */
+  copyCabinetToClipboard: (id: FurnitureId) => string | null;
+  /** Вставить шкаф из буфера (§96). */
+  pasteCabinetFromClipboard: (json?: string, name?: string) => FurnitureId | null;
+  /** Удалить шкаф вместе с зависимостями (§97). */
+  deleteCabinet: (id: FurnitureId) => boolean;
+  /** Сохранить текущую модель как пресет (§87/§88). */
+  saveCabinetPreset: (id: FurnitureId, name: string) => CabinetPreset | null;
+  /** Удалить пользовательский пресет. */
+  removeCabinetPreset: (presetId: string) => boolean;
+  /** Импортировать пресеты из JSON (§89). */
+  importCabinetPresetsFile: (json: string) => { ok: boolean; added: number; errors: string[] };
 
   // ── Модули (этап 24) ──────────────────────────────────────────────────────
   /** Создать модуль из шаблона (§109). */
@@ -696,6 +800,7 @@ export const useEditorStore = create<EditorState>()(
       selectedPartId: null,
       activeFurnitureId: null,
       selectedConnectionId: null,
+      cabinetClipboard: null,
       selectedOperationId: null,
       selectedCuttingPieceId: null,
       cuttingRunning: false,
@@ -1040,9 +1145,13 @@ export const useEditorStore = create<EditorState>()(
           p.furnitures.push(createFurniture(name ?? `Изделие ${p.furnitures.length + 1}`));
         }),
 
+      /* Удаление изделия убирает и его соединения (§97): иначе остались бы
+       * узлы, ссылающиеся на исчезнувшие детали, и «мёртвая» присадка. */
       removeFurniture: (id) => {
+        const next = removeCabinetPure(get().project, id);
         commit((p) => {
-          p.furnitures = p.furnitures.filter((f) => f.id !== id);
+          p.furnitures = next.furnitures;
+          p.hardwareConnections = next.connections;
         });
         if (get().activeFurnitureId === id) set((s) => void (s.activeFurnitureId = null));
       },
@@ -1107,8 +1216,12 @@ export const useEditorStore = create<EditorState>()(
         }
         const before = readParametricModel(furniture);
         const existing = furniture.assemblies[0]?.parts ?? [];
-        const result = generateParts(model, existing);
-        if (!result.ok) {
+
+        /* Единственный маршрут пересчёта (§60): проверка → детали → фурнитура →
+         * соединения → присадка → раскрой/2D/3D. Пересчёт атомарен: при ошибке
+         * валидации в проект не попадает ничего (§61). */
+        const result = regenerateCabinet(project, id, model, { previous: before });
+        if (!result.applied) {
           return {
             ok: false, added: 0, removed: 0, changed: 0,
             errors: result.issues.filter((i) => i.severity === 'error').map((i) => i.message),
@@ -1117,15 +1230,9 @@ export const useEditorStore = create<EditorState>()(
         }
         const diff = diffParametric(before, model, existing);
 
-        /* Соединения пересобираются в ТОМ ЖЕ commit, что и детали (§47):
+        /* Соединения записываются в ТОМ ЖЕ commit, что и детали (§47):
          * иначе undo откатил бы детали, оставив соединения от новой
          * конструкции. Ручные соединения при этом сохраняются (§50). */
-        const reconciled = reconcileConnections(project, result.parts, {
-          jointCategory: model.jointType,
-          construction: model.construction,
-          handles: model.doors.handleEnabled,
-        });
-
         commit((p) => {
           const f = findFurniture(p, id);
           if (!f) return;
@@ -1138,15 +1245,15 @@ export const useEditorStore = create<EditorState>()(
           const foreign = p.hardwareConnections.filter(
             (c) => !ownPartIds.has(String(c.partAId)) && !ownPartIds.has(String(c.partBId)),
           );
-          p.hardwareConnections = [...foreign, ...reconciled.connections];
+          p.hardwareConnections = [...foreign, ...result.connections];
         });
 
         return {
           ok: true,
           diff,
-          added: result.added.length,
-          removed: result.removed.length,
-          changed: result.changed.length,
+          added: result.added,
+          removed: result.removed,
+          changed: result.changed,
           errors: [],
           description: describeDiff(diff),
         };
@@ -1168,6 +1275,179 @@ export const useEditorStore = create<EditorState>()(
         const applied = get().applyParametricModel(id, command.model);
         // Описание команды информативнее описания диффа.
         return applied.ok ? { ...applied, description: command.description } : applied;
+      },
+
+      // ── Генератор корпусной мебели (этап 28) ────────────────────────────
+
+      getCabinetModel: (id) => {
+        const furniture = findFurniture(get().project, id);
+        return furniture ? toCabinetModel(readParametricModel(furniture)) : null;
+      },
+
+      /* Мастер создания (§92): тип → размеры → материал → схема → создать.
+       * Пресет задаёт стартовые значения, явные размеры их перекрывают. */
+      createParametricCabinet: (input) => {
+        const project = get().project;
+        const model = cabinetModelFromInput(project, input);
+        if (!model) return null;
+        const built = buildCabinetPure(project, model, input.name);
+        // Детали не собрались — в проект не попадает ничего (§61).
+        if (built.furniture.assemblies[0]?.parts.length === 0) return null;
+
+        commit((p) => {
+          p.furnitures.push(built.furniture);
+          p.hardwareConnections = [...p.hardwareConnections, ...built.connections];
+        });
+        set((st) => void (st.activeFurnitureId = built.furniture.id));
+        return built.furniture.id;
+      },
+
+      previewParametricCabinet: (input) => {
+        const project = get().project;
+        const model = cabinetModelFromInput(project, input);
+        return model ? previewCabinet(project, model) : null;
+      },
+
+      /* Несколько параметров — одна транзакция undo (§117): патч уходит в
+       * модель целиком, а не полем за полем. */
+      applyCabinetPatch: (id, patch, description) => {
+        const model = get().getCabinetModel(id);
+        if (!model) {
+          return { ok: false, added: 0, removed: 0, changed: 0, errors: ['Изделие не найдено.'], description: '' };
+        }
+        const applied = get().applyParametricModel(id, toCabinetModel({ ...model, ...patch }));
+        return description && applied.ok ? { ...applied, description } : applied;
+      },
+
+      checkCabinetConstruction: (id) => {
+        const project = get().project;
+        const furniture = findFurniture(project, id);
+        if (!furniture) return null;
+        return checkCabinet(project, readParametricModel(furniture), furniture.assemblies[0]?.parts ?? []);
+      },
+
+      getCabinetBom: (id) => {
+        const project = get().project;
+        const furniture = id ? findFurniture(project, id) : undefined;
+        return cabinetBom(project, furniture ?? undefined);
+      },
+
+      /* «Распределить равномерно» (§18): ручные положения полок снимаются,
+       * дальше работает обычный расчёт. */
+      distributeShelvesEqually: (id) => {
+        const model = get().getCabinetModel(id);
+        if (!model) {
+          return { ok: false, added: 0, removed: 0, changed: 0, errors: ['Изделие не найдено.'], description: '' };
+        }
+        return get().applyCabinetPatch(
+          id,
+          { shelves: { ...model.shelves, distribution: 'AUTO_EQUAL', fixedShelves: [] } },
+          'Полки распределены равномерно',
+        );
+      },
+
+      /* Ручное положение полки (§19/§20): остальные параметры продолжают
+       * работать, полка получает override. */
+      setShelfPosition: (id, index, offset) => {
+        const model = get().getCabinetModel(id);
+        if (!model) {
+          return { ok: false, added: 0, removed: 0, changed: 0, errors: ['Изделие не найдено.'], description: '' };
+        }
+        const fixedShelves = [
+          ...model.shelves.fixedShelves.filter((f) => f.index !== index),
+          { index, offset, fixed: true },
+        ].sort((a, b) => a.index - b.index);
+        return get().applyCabinetPatch(
+          id,
+          { shelves: { ...model.shelves, fixedShelves } },
+          `Полка ${index}: положение ${Math.round(offset)} мм`,
+        );
+      },
+
+      resetShelfPosition: (id, index) => {
+        const model = get().getCabinetModel(id);
+        if (!model) {
+          return { ok: false, added: 0, removed: 0, changed: 0, errors: ['Изделие не найдено.'], description: '' };
+        }
+        return get().applyCabinetPatch(
+          id,
+          { shelves: { ...model.shelves, fixedShelves: model.shelves.fixedShelves.filter((f) => f.index !== index) } },
+          `Полка ${index}: возвращён расчёт`,
+        );
+      },
+
+      copyCabinetToClipboard: (id) => {
+        const json = copyCabinetPure(get().project, id);
+        if (json) set((st) => void (st.cabinetClipboard = json));
+        return json;
+      },
+
+      pasteCabinetFromClipboard: (json, name) => {
+        const source = json ?? get().cabinetClipboard;
+        if (!source) return null;
+        const copy = pasteCabinetPure(source, name);
+        if (!copy) return null;
+        commit((p) => {
+          p.furnitures.push(copy.furniture);
+          p.hardwareConnections = [...p.hardwareConnections, ...copy.connections];
+        });
+        return copy.furniture.id;
+      },
+
+      /* Удаление шкафа (§97): вместе с ним исчезают его соединения, а значит и
+       * производная присадка — «мёртвых» ссылок не остаётся. */
+      deleteCabinet: (id) => {
+        const project = get().project;
+        const impact = cabinetRemovalImpact(project, id);
+        if (!impact) return false;
+        const next = removeCabinetPure(project, id);
+        commit((p) => {
+          p.furnitures = next.furnitures;
+          p.hardwareConnections = next.connections;
+        });
+        if (get().activeFurnitureId === id) set((st) => void (st.activeFurnitureId = null));
+        return true;
+      },
+
+      saveCabinetPreset: (id, name) => {
+        const model = get().getCabinetModel(id);
+        if (!model || !name.trim()) return null;
+        const preset = presetFromModel(model, name.trim());
+        commit((p) => {
+          const custom = Array.isArray(p.metadata?.[CABINET_PRESETS_KEY])
+            ? (p.metadata![CABINET_PRESETS_KEY] as CabinetPreset[])
+            : [];
+          p.metadata = { ...(p.metadata ?? {}), [CABINET_PRESETS_KEY]: [...custom, preset] };
+        });
+        return preset;
+      },
+
+      removeCabinetPreset: (presetId) => {
+        const custom = Array.isArray(get().project.metadata?.[CABINET_PRESETS_KEY])
+          ? (get().project.metadata![CABINET_PRESETS_KEY] as CabinetPreset[])
+          : [];
+        if (!custom.some((p) => p.id === presetId)) return false;
+        commit((p) => {
+          p.metadata = {
+            ...(p.metadata ?? {}),
+            [CABINET_PRESETS_KEY]: custom.filter((x) => x.id !== presetId),
+          };
+        });
+        return true;
+      },
+
+      importCabinetPresetsFile: (json) => {
+        const result = importCabinetPresetsPure(json);
+        if (!result.ok) return { ok: false, added: 0, errors: result.errors };
+        const custom = Array.isArray(get().project.metadata?.[CABINET_PRESETS_KEY])
+          ? (get().project.metadata![CABINET_PRESETS_KEY] as CabinetPreset[])
+          : [];
+        const existing = new Set(custom.map((p) => p.id));
+        const fresh = result.presets.filter((p) => !existing.has(p.id));
+        commit((p) => {
+          p.metadata = { ...(p.metadata ?? {}), [CABINET_PRESETS_KEY]: [...custom, ...fresh] };
+        });
+        return { ok: true, added: fresh.length, errors: result.errors };
       },
 
       createModuleFromTemplate: (templateId, name) => {
@@ -1202,35 +1482,20 @@ export const useEditorStore = create<EditorState>()(
 
       /* Копия получает НОВЫЕ идентификаторы (§82): иначе копия и оригинал
        * делили бы детали, и правка одной меняла бы другую. */
+      /* Дубликат изделия (§95): копия полностью независима — новые id деталей,
+       * сборок, соединений и присадки. Логика общая с «вставить из буфера». */
       duplicateFurniture: (id, name) => {
-        const source = findFurniture(get().project, id);
+        const project = get().project;
+        const source = findFurniture(project, id);
         if (!source) return null;
-        const copy = structuredClone(source);
-        copy.id = newFurnitureId();
-        copy.name = name ?? `${source.name} (копия)`;
-        const idMap = new Map<string, PartId>();
-        for (const assembly of copy.assemblies) {
-          assembly.id = newAssemblyId();
-          assembly.parts = assembly.parts.map((part) => {
-            const fresh = newPartId();
-            idMap.set(String(part.id), fresh);
-            return { ...part, id: fresh };
-          });
-        }
-        // Узлы копии ссылаются на её собственные детали, а не на оригинал.
-        const connections = get().project.hardwareConnections
-          .filter((c) => idMap.has(String(c.partAId)) && idMap.has(String(c.partBId)))
-          .map((c) => ({
-            ...c,
-            id: newHardwareConnectionId(),
-            partAId: idMap.get(String(c.partAId))!,
-            partBId: idMap.get(String(c.partBId))!,
-          }));
+        const copy = duplicateFurnitureData(
+          source, project.hardwareConnections, name ?? `${source.name} (копия)`,
+        );
         commit((p) => {
-          p.furnitures.push(copy);
-          p.hardwareConnections.push(...connections);
+          p.furnitures.push(copy.furniture);
+          p.hardwareConnections.push(...copy.connections);
         });
-        return copy.id;
+        return copy.furniture.id;
       },
 
       mirrorFurniture: (id) => {
