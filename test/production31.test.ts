@@ -289,9 +289,14 @@ describe('Производство 31 — готовность', () => {
   });
 
   it('Тест 25: нулевой размер детали — ошибка размеров', () => {
+    // Модель такую деталь больше не принимает (этап 36), но проверка нужна
+    // для данных из импорта и старых файлов — подставляем их напрямую.
+    const list = parts().map((p, i) => (i === 0 ? { ...p, width: 0 } : p));
+    expect(checkDimensions(list).some((i) => i.code === 'production.dimension')).toBe(true);
+    // Заодно фиксируем, что через модель такой размер не пройдёт.
     const target = allParts(project())[0];
     store().updatePart(target.id, { width: 0 });
-    expect(checkDimensions(parts()).some((i) => i.code === 'production.dimension')).toBe(true);
+    expect(allParts(project())[0].width).toBeGreaterThan(0);
   });
 
   it('Тест 26: ссылка на отсутствующий кромочный материал — ошибка', () => {

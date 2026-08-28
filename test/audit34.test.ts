@@ -361,15 +361,26 @@ describe('Аудит 34 — пустые состояния и границы', 
     expect(productionBatches(productionParts(p))).toEqual([]);
   });
 
-  it('A19: нулевые и отрицательные размеры отклоняются или помечаются ошибкой', () => {
+  it('A19: нулевые и отрицательные размеры не попадают в модель, а данные из файла помечаются ошибкой', () => {
     const part = allParts(project())[0];
-    store().updatePart(part.id, { width: 0 });
-    const issues = productionReadiness(project(), productionParts(project())).issues;
-    expect(issues.some((i) => i.severity === 'error')).toBe(true);
+    const width = part.width;
 
+    // Через модель такие размеры не проходят (этап 36).
+    store().updatePart(part.id, { width: 0 });
     store().updatePart(part.id, { width: -100 });
-    expect(() => buildFurnitureScene(project())).not.toThrow();
-    expect(() => runCutting(project())).not.toThrow();
+    expect(allParts(project())[0].width).toBe(width);
+
+    // Данные из файла могут быть битыми — их ловит проверка готовности,
+    // а раскрой и сцена не падают.
+    const broken = structuredClone(project());
+    const assembly = broken.furnitures
+      .flatMap((f) => f.assemblies)
+      .find((a) => a.parts.length > 0)!;
+    assembly.parts[0].width = 0;
+    const issues = productionReadiness(broken, productionParts(broken)).issues;
+    expect(issues.some((i) => i.severity === 'error')).toBe(true);
+    expect(() => buildFurnitureScene(broken)).not.toThrow();
+    expect(() => runCutting(broken)).not.toThrow();
   });
 });
 

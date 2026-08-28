@@ -352,6 +352,42 @@ export const shelfRule: ParametricRule = {
 
 // ── Задняя стенка (§32/§33) ──────────────────────────────────────────────────
 
+/**
+ * Наибольший кусок задней стенки, мм (этап 36).
+ *
+ * Задняя стенка большого шкафа не существует одним листом: стандартный лист
+ * ХДФ — 2745×1700 мм, и деталь 2368×2368 мм не выпилить ни из одного формата.
+ * Поэтому стенка, не помещающаяся в лист, делится на равные куски по стыку —
+ * так её и делают в цеху. Значения взяты от стандартного листа с припуском
+ * на обрезку кромок листа.
+ */
+export const BACK_PIECE_LIMIT = { long: 2700, short: 1650 };
+
+/** Помещается ли кусок в лист хотя бы в одной ориентации. */
+function backPieceFits(width: number, height: number): boolean {
+  const { long, short } = BACK_PIECE_LIMIT;
+  return (width <= long && height <= short) || (width <= short && height <= long);
+}
+
+/**
+ * На сколько кусков делить заднюю стенку: {cols} по ширине, {rows} по высоте.
+ * Стенка, помещающаяся в лист, остаётся ОДНОЙ деталью — старые проекты не
+ * меняются.
+ */
+export function backPanelSplit(width: number, height: number): { cols: number; rows: number } {
+  if (backPieceFits(width, height)) return { cols: 1, rows: 1 };
+  // Сначала делим по длинной стороне: меньше стыков.
+  for (let n = 2; n <= 8; n++) {
+    if (height >= width && backPieceFits(width, height / n)) return { cols: 1, rows: n };
+    if (width > height && backPieceFits(width / n, height)) return { cols: n, rows: 1 };
+  }
+  // Крайний случай: очень большая стенка — делим по обеим сторонам.
+  for (let n = 2; n <= 8; n++) {
+    if (backPieceFits(width / n, height / n)) return { cols: n, rows: n };
+  }
+  return { cols: 1, rows: 1 };
+}
+
 export const backPanelRule: ParametricRule = {
   id: 'CABINET.BACK',
   name: 'Задняя стенка',
@@ -376,9 +412,42 @@ export const backPanelRule: ParametricRule = {
           }
         : { x: g.interior.x, y: g.interior.y, z: zInset };
 
-    return [define('CABINET.BACK', 'Задняя стенка', 'BACK', box, 'z', model, material, {
-      partType: 'back', backType: b.type,
-    })];
+    const width = box.x.max - box.x.min;
+    const height = box.y.max - box.y.min;
+    const { cols, rows } = backPanelSplit(width, height);
+    if (cols === 1 && rows === 1) {
+      return [define('CABINET.BACK', 'Задняя стенка', 'BACK', box, 'z', model, material, {
+        partType: 'back', backType: b.type,
+      })];
+    }
+
+    /* Составная стенка: куски равные, стык проходит по всей длине. Ключи
+     * содержат ряд и столбец, поэтому кусок узнаётся при пересчёте и
+     * сохраняет свой id, номер и кромку. */
+    const out: PartDefinition[] = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const piece: Box = {
+          x: {
+            min: box.x.min + (width * c) / cols,
+            max: box.x.min + (width * (c + 1)) / cols,
+          },
+          y: {
+            min: box.y.min + (height * r) / rows,
+            max: box.y.min + (height * (r + 1)) / rows,
+          },
+          z: box.z,
+        };
+        const index = r * cols + c + 1;
+        out.push(define(
+          `CABINET.BACK.R${r + 1}C${c + 1}`,
+          `Задняя стенка ${index}`,
+          'BACK', piece, 'z', model, material,
+          { partType: 'back', backType: b.type, index, row: r + 1, column: c + 1 },
+        ));
+      }
+    }
+    return out;
   },
 };
 

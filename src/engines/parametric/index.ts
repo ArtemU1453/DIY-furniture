@@ -70,6 +70,8 @@ export {
   partitionPositions,
   sectionBounds,
   modelSections,
+  backPanelSplit,
+  BACK_PIECE_LIMIT,
   rulesForKind,
   sideRule,
   topBottomRule,
