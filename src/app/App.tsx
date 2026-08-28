@@ -17,6 +17,7 @@ import { DocumentsView } from '@/components/panels/DocumentsView';
 import { LibraryView } from '@/components/panels/LibraryView';
 import { ProductionView } from '@/components/panels/ProductionView';
 import { ModulesView } from '@/components/panels/ModulesView';
+import { Editor2DView } from '@/components/panels/Editor2DView';
 import { ParametricPanel } from '@/components/panels/ParametricPanel';
 import { Scene3D, type CameraApi } from '@/features/designer/Scene3D';
 import { ModelTree } from '@/components/panels/ModelTree';
@@ -28,7 +29,7 @@ import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { saveCurrentProject } from '@/features/project/projectActions';
 
-type CenterView = '3d' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'modules';
+type CenterView = '3d' | 'editor2d' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'modules';
 type ViewMode = '3d' | '2d' | 'split';
 
 export function App() {
@@ -117,6 +118,7 @@ export function App() {
           {(
             [
               ['3d', '3D'],
+              ['editor2d', '2D-редактор'],
               ['table', 'Детали'],
               ['materials', 'Материалы'],
               ['hardware', 'Фурнитура'],
@@ -196,6 +198,9 @@ export function App() {
                 </aside>
               </div>
             </div>
+          )}
+          {centerView === 'editor2d' && (
+            <Editor2DView onOpenPart={(id) => { selectPart(id); setCenterView('table'); }} />
           )}
           {centerView === 'table' && <PartsTable />}
           {centerView === 'materials' && <MaterialsView />}
