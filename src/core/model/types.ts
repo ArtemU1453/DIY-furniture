@@ -982,6 +982,8 @@ export interface CuttingRemnant {
   height: Mm;
   area: number; // мм²
   usable: boolean;
+  /** Складская позиция, если остаток оприходован (§100 этапа 30). */
+  stockSheetId?: string;
 }
 
 /** Линия реза (гильотинная), вычисленная из расположения деталей и пропила. */
@@ -1124,8 +1126,16 @@ export interface CuttingSettingsSnapshot {
   seed: number;
 }
 
-/** Статус задания раскроя (§3). */
-export type CuttingJobStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'ERROR' | 'CANCELLED';
+/**
+ * Статус задания раскроя (§3 этапа 14, §123 этапа 30).
+ *
+ * Первые пять значений — исходный набор этапа 14, он продолжает работать.
+ * READY/DIRTY/CALCULATING/VALID/WARNING добавлены этапом 30 и описывают
+ * задание подробнее: посчитано и годно, требует пересчёта, считается сейчас.
+ */
+export type CuttingJobStatus =
+  | 'PENDING' | 'RUNNING' | 'DONE' | 'ERROR' | 'CANCELLED'
+  | 'READY' | 'DIRTY' | 'CALCULATING' | 'VALID' | 'WARNING';
 
 /**
  * Задание раскроя (§3). Одно задание = ОДИН материал одной толщины (§25/§26):
@@ -1147,7 +1157,45 @@ export interface CuttingJob {
   status: CuttingJobStatus;
   createdAt: string; // ISO
   updatedAt: string; // ISO
+  /**
+   * Версия задания (§118 этапа 30): растёт при каждом успешном пересчёте.
+   * Отсутствие поля читается как версия 1 — задания прошлых этапов остаются
+   * действительными.
+   */
+  version?: number;
+  /** Остатки задания (§3/§38 этапа 30); выводятся из result.sheets. */
+  leftovers?: LeftoverSheet[];
+  /** Исходные данные изменились — задание требует пересчёта (§120). */
+  dirty?: boolean;
 }
+
+/**
+ * Полезный остаток листа (§38–§41 этапа 30).
+ *
+ * Это ПРЕДСТАВЛЕНИЕ остатка: сам прямоугольник считает раскрой
+ * (CuttingRemnant), а на складе он живёт как StoredRemnant. Второй геометрии
+ * здесь не заводится — только производственные свойства.
+ */
+export interface LeftoverSheet {
+  id: string;
+  width: Mm;
+  height: Mm;
+  thickness: Mm;
+  materialId: MaterialId;
+  /** Лист, из которого получен остаток (§39). */
+  sourceSheetId: string;
+  grainDirection: GrainDirection;
+  status: LeftoverStatus;
+  /** Складская позиция, если остаток оприходован (§100). */
+  stockSheetId?: string;
+  area: number; // мм²
+}
+
+/**
+ * Состояние остатка (§40). USABLE и TOO_SMALL ВЫЧИСЛЯЮТСЯ из минимальных
+ * размеров, USED и RESERVED — из складского учёта.
+ */
+export type LeftoverStatus = 'USABLE' | 'TOO_SMALL' | 'USED' | 'RESERVED';
 
 /** Режим оптимизации раскроя. */
 export type OptimizationMode = 'FAST' | 'BALANCED' | 'MAX_UTILIZATION';
@@ -1327,6 +1375,10 @@ export interface SheetMaterial {
   allowRotate?: boolean;
   /** Архивный формат не предлагается в новом раскрое (§80). */
   archived?: boolean;
+  /** Складская позиция листа (§99 этапа 30). */
+  stockSheetId?: string;
+  /** Сколько листов зарезервировано заданиями раскроя (§102 этапа 30). */
+  reserved?: number;
   parameters?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }
@@ -1349,6 +1401,10 @@ export interface StoredRemnant {
    * до этого этапа, продолжают работать как раньше.
    */
   status?: RemnantStatus;
+  /** Складская позиция остатка (§100 этапа 30). */
+  stockSheetId?: string;
+  /** Кем зарезервирован: id задания раскроя (§101/§102 этапа 30). */
+  reservedBy?: string;
 }
 
 /**

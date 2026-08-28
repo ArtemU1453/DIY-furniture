@@ -101,6 +101,21 @@ import {
   type SizeField,
   type SnapSettings3D,
 } from '@/engines/interaction';
+import {
+  applyManualPlacement,
+  buildCuttingJobs,
+  buildCuttingQueue,
+  exportCuttingJobs,
+  freezeExcept,
+  harvestLeftovers,
+  importCuttingJobs,
+  lockPlacement as lockPlacementPure,
+  lockSheet as lockSheetPure,
+  moveQueueItem,
+  releaseJob,
+  reserveForJob,
+  upsertPlacement,
+} from '@/engines/cutting';
 import { importHardwareLibrary, planPresetApplication } from '@/engines/hardware';
 import {
   applyEdgeConfiguration,
@@ -133,6 +148,7 @@ import type {
   Hardware,
   HardwareConnection,
   LockedPlacement,
+  PieceRotation,
   MachiningOperation,
   Material,
   Part,
@@ -307,8 +323,17 @@ function cabinetModelFromInput(project: Project, input: CreateCabinetInput): Cab
     ? project.materials.find((m) => String(m.id) === String(input.materialId))
     : (project.materials.find((m) => m.kind === 'ldsp') ?? project.materials[0]);
 
+  /* Задняя стенка тоньше корпуса: если материал под неё не выбран, берём из
+   * проекта материал подходящей толщины (ХДФ 3 мм и т.п.). Иначе 3-миллиметровая
+   * деталь попадала бы в раскрой 16-миллиметрового листа (§90 этапа 30). */
+  const backThickness = base.backPanel.thickness;
+  const backMaterial = base.backPanel.material
+    ?? project.materials.find((m) => Math.abs(m.thickness - backThickness) < 1e-6)?.id
+    ?? null;
+
   return toCabinetModel({
     ...base,
+    backPanel: { ...base.backPanel, material: backMaterial },
     ...(input.type ? { cabinetType: input.type } : {}),
     ...(input.width != null ? { width: input.width } : {}),
     ...(input.height != null ? { height: input.height } : {}),
@@ -819,6 +844,34 @@ export interface EditorState {
   /** Сменить состояние остатка (§91/§92): AVAILABLE / RESERVED / USED / ARCHIVED. */
   setRemnantStatus: (id: string, status: RemnantStatus) => void;
   clearRemnants: () => void;
+
+  // ── Подготовка к раскрою (этап 30) ────────────────────────────────────────
+  /** Ручное перемещение и поворот детали на листе (§74–§78). */
+  moveCuttingPiece: (
+    sheetId: string,
+    request: { pieceId: string; x: number; y: number; rotation: PieceRotation },
+  ) => { ok: boolean; issues: string[] };
+  /** Зафиксировать деталь на её текущем месте (§79). */
+  lockCuttingPiece: (sheetId: string, pieceId: string) => boolean;
+  /** Зафиксировать весь лист (§80). */
+  lockCuttingSheet: (sheetId: string) => number;
+  /** Пересчитать только выбранные детали, остальные заморозить (§82/§83). */
+  reoptimizeCuttingPieces: (pieceIds: string[]) => Promise<void>;
+  /** Оприходовать полезные остатки на склад (§42). */
+  harvestCuttingLeftovers: () => number;
+  /** Зарезервировать материал под задание (§101/§102). */
+  reserveCuttingMaterial: (
+    request: { jobId: string; materialId: MaterialId; thickness: number; sheets: number; remnantIds?: string[] },
+  ) => { reservedSheets: number; reservedRemnants: number; warnings: string[] };
+  /** Снять резерв задания (§103). */
+  releaseCuttingMaterial: (jobId: string) => { releasedSheets: number; releasedRemnants: number };
+  /** Порядок групп «материал + толщина» в очереди (§94). */
+  setCuttingQueueOrder: (order: string[]) => void;
+  moveCuttingQueueItem: (key: string, delta: number) => void;
+  /** Экспорт заданий раскроя в JSON (§116). */
+  exportCuttingJobsJson: () => string;
+  /** Импорт заданий раскроя из JSON (§117). */
+  importCuttingJobsJson: (json: string) => { ok: boolean; jobs: number; errors: string[] };
 
   // ── 2D-редактор ───────────────────────────────────────────────────────────
   /** Правка состояния интерфейса редактора. В историю НЕ попадает (§2/§121). */
@@ -3194,6 +3247,152 @@ export const useEditorStore = create<EditorState>()(
           if (remnant) remnant.status = status;
         }),
       clearRemnants: () => commit((p) => void (p.remnants = [])),
+
+      // ── Подготовка к раскрою (этап 30) ──────────────────────────────────
+
+      /* Ручная правка положения (§74–§78): недопустимое положение НЕ
+       * сохраняется, а фиксация переживает следующий пересчёт (§83). */
+      moveCuttingPiece: (sheetId, request) => {
+        const project = get().project;
+        const sheet = (project.cutting.report?.jobs ?? [])
+          .flatMap((job) => job.sheets)
+          .find((s) => s.id === sheetId);
+        if (!sheet) return { ok: false, issues: ['Лист не найден.'] };
+
+        const material = project.materials.find((m) => String(m.id) === String(sheet.materialId));
+        const kerf = project.cutting.settings.kerfOverride ?? material?.kerf ?? 3.2;
+        const part = allParts(project).find(
+          (p) => sheet.placements.some((pl) => pl.pieceId === request.pieceId && String(pl.partId) === String(p.id)),
+        );
+        const outcome = applyManualPlacement(sheet, {
+          ...request,
+          kerf,
+          rotationAllowed: part ? part.grain === 'none' || project.cutting.settings.respectGrain === false : true,
+        });
+        if (!outcome.ok || !outcome.locked || !outcome.sheet) {
+          return { ok: false, issues: outcome.issues.map((i) => i.message) };
+        }
+
+        const nextSheet = outcome.sheet;
+        commit((p) => {
+          p.cutting.settings.locked = upsertPlacement(p.cutting.settings.locked, outcome.locked!);
+          for (const job of p.cutting.report?.jobs ?? []) {
+            const index = job.sheets.findIndex((s) => s.id === sheetId);
+            if (index >= 0) job.sheets[index] = nextSheet;
+          }
+        });
+        return { ok: true, issues: [] };
+      },
+
+      lockCuttingPiece: (sheetId, pieceId) => {
+        const sheet = (get().project.cutting.report?.jobs ?? [])
+          .flatMap((job) => job.sheets)
+          .find((s) => s.id === sheetId);
+        if (!sheet) return false;
+        const locked = lockPlacementPure(sheet, pieceId);
+        if (!locked) return false;
+        commit((p) => {
+          p.cutting.settings.locked = upsertPlacement(p.cutting.settings.locked, locked);
+        });
+        return true;
+      },
+
+      lockCuttingSheet: (sheetId) => {
+        const sheet = (get().project.cutting.report?.jobs ?? [])
+          .flatMap((job) => job.sheets)
+          .find((s) => s.id === sheetId);
+        if (!sheet) return 0;
+        const locks = lockSheetPure(sheet);
+        commit((p) => {
+          let list = p.cutting.settings.locked;
+          for (const lock of locks) list = upsertPlacement(list, lock);
+          p.cutting.settings.locked = list;
+        });
+        return locks.length;
+      },
+
+      /* Перерасчёт выбранных деталей (§82): всё остальное замораживается на
+       * своих местах, поэтому лист не перекладывается целиком. */
+      reoptimizeCuttingPieces: async (pieceIds) => {
+        const sheets = (get().project.cutting.report?.jobs ?? []).flatMap((job) => job.sheets);
+        const frozen = freezeExcept(sheets, pieceIds);
+        commit((p) => void (p.cutting.settings.locked = frozen));
+        await get().recalculateCutting();
+      },
+
+      harvestCuttingLeftovers: () => {
+        const project = get().project;
+        const materials = new Map(project.materials.map((m) => [String(m.id), m]));
+        let next = project.remnants;
+        for (const result of project.cutting.report?.jobs ?? []) {
+          next = harvestLeftovers(result, materials.get(String(result.materialId)), next, {
+            minimumUsableWidth: project.cutting.settings.usableRemnant.minWidth,
+            minimumUsableHeight: project.cutting.settings.usableRemnant.minLength,
+            minimumUsableArea: project.cutting.settings.usableRemnant.minArea,
+          });
+        }
+        const added = next.length - project.remnants.length;
+        if (added > 0) commit((p) => void (p.remnants = next));
+        return added;
+      },
+
+      reserveCuttingMaterial: (request) => {
+        const result = reserveForJob(get().project, request);
+        commit((p) => {
+          p.sheets = result.sheets;
+          p.remnants = result.remnants;
+        });
+        return {
+          reservedSheets: result.reservedSheets,
+          reservedRemnants: result.reservedRemnants,
+          warnings: result.warnings,
+        };
+      },
+
+      releaseCuttingMaterial: (jobId) => {
+        const result = releaseJob(get().project, jobId);
+        commit((p) => {
+          p.sheets = result.sheets;
+          p.remnants = result.remnants;
+        });
+        return { releasedSheets: result.reservedSheets, releasedRemnants: result.reservedRemnants };
+      },
+
+      setCuttingQueueOrder: (order) => commit((p) => {
+        p.metadata = { ...(p.metadata ?? {}), cuttingQueueOrder: [...order] };
+      }),
+
+      moveCuttingQueueItem: (key, delta) => {
+        const project = get().project;
+        const stored = Array.isArray(project.metadata?.cuttingQueueOrder)
+          ? (project.metadata!.cuttingQueueOrder as string[])
+          : buildCuttingQueue(project).map((i) => i.key);
+        get().setCuttingQueueOrder(moveQueueItem(stored, key, delta));
+      },
+
+      exportCuttingJobsJson: () => {
+        const project = get().project;
+        return exportCuttingJobs(project, buildCuttingJobs(project));
+      },
+
+      importCuttingJobsJson: (json) => {
+        const project = get().project;
+        const result = importCuttingJobs(json, project);
+        if (!result.ok) return { ok: false, jobs: 0, errors: result.errors };
+        /* Импорт восстанавливает РЕЗУЛЬТАТ раскроя, а не детали: детали
+         * остаются за ProjectModel (§4/§8). */
+        const jobs = result.jobs.map((job) => job.result).filter((r): r is NonNullable<typeof r> => Boolean(r));
+        if (jobs.length > 0) {
+          commit((p) => {
+            p.cutting.report = {
+              jobs,
+              generatedAt: new Date().toISOString(),
+              sourceVersion: result.projectSignature ?? '',
+            };
+          });
+        }
+        return { ok: true, jobs: result.jobs.length, errors: result.errors };
+      },
 
       selectPart: (id) =>
         set((state) => {
