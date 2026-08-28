@@ -24,6 +24,7 @@ import { InteractiveEditor } from '@/components/panels/InteractiveEditor';
 import { CuttingPrep } from '@/components/panels/CuttingPrep';
 import { ProductionCenter } from '@/components/panels/ProductionCenter';
 import { HardwareCatalogView } from '@/components/panels/HardwareCatalogView';
+import { Viewer3D } from '@/components/panels/Viewer3D';
 import { ParametricPanel } from '@/components/panels/ParametricPanel';
 import { Scene3D, type CameraApi } from '@/features/designer/Scene3D';
 import { ModelTree } from '@/components/panels/ModelTree';
@@ -35,7 +36,7 @@ import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { saveCurrentProject } from '@/features/project/projectActions';
 
-type CenterView = '3d' | 'editor2d' | 'interactive' | 'cabinet' | 'cuttingPrep' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'productionCenter' | 'modules' | 'hardwareCatalog';
+type CenterView = '3d' | 'editor2d' | 'interactive' | 'cabinet' | 'cuttingPrep' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'productionCenter' | 'modules' | 'hardwareCatalog' | 'viewer3d';
 type ViewMode = '3d' | '2d' | 'split';
 
 export function App() {
@@ -141,6 +142,7 @@ export function App() {
               ['production', 'Производство'],
               ['productionCenter', 'Цех'],
               ['hardwareCatalog', 'Каталог фурнитуры'],
+              ['viewer3d', '3D-редактор'],
               ['documents', 'Документы'],
               ['library', 'Библиотека'],
             ] as Array<[CenterView, string]>
@@ -282,6 +284,14 @@ export function App() {
           )}
           {centerView === 'hardwareCatalog' && (
             <HardwareCatalogView onOpenPart={(id) => { selectPart(id as never); setCenterView('table'); }} />
+          )}
+          {centerView === 'viewer3d' && (
+            <Viewer3D
+              onOpenPart={(id) => { selectPart(id as never); setCenterView('table'); }}
+              onOpenCutting={() => setCenterView('cutting')}
+              onOpenProduction={() => setCenterView('productionCenter')}
+              onOpenBom={() => setCenterView('production')}
+            />
           )}
           {centerView === 'documents' && (
             <DocumentsView
