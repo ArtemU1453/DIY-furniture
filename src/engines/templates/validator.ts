@@ -3,7 +3,9 @@
  * изделия. Пользовательские ошибки формулируются понятно (без stack trace).
  */
 import type { Part } from '@/core/model/types';
-import { buildCabinet, validateCabinet, type CabinetParameters } from '@/engines/furniture/cabinet';
+import { validateCabinet, type CabinetParameters } from '@/engines/furniture/cabinet';
+import { fromCabinetParameters } from '@/engines/parametric/templates';
+import { generateParts } from '@/engines/parametric/generator';
 import { detectCircular, evaluateFormula, FormulaError } from './formula';
 import type { FurnitureTemplate, TemplateValues } from './types';
 
@@ -69,8 +71,13 @@ export function validateFormulas(formulas: Record<string, string>, scope: Record
   return issues;
 }
 
-/** Проверка геометрии сгенерированного изделия (переиспользует корпусный валидатор). */
+/**
+ * Проверка геометрии сгенерированного изделия (переиспользует корпусный валидатор).
+ *
+ * Детали для проверки строит ТОТ ЖЕ генератор, что и создание изделия (этап 35):
+ * иначе предпросмотр шаблона показывал бы не то, что получит пользователь.
+ */
 export function validateTemplateGeometry(params: CabinetParameters): TemplateIssue[] {
-  const parts: Part[] = buildCabinet(params).parts;
+  const parts: Part[] = generateParts(fromCabinetParameters(params), []).parts;
   return validateCabinet(parts, params).map((i) => ({ severity: i.severity === 'info' ? 'warning' : i.severity, code: i.code, message: i.message }));
 }

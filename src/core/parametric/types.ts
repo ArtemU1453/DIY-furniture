@@ -336,6 +336,9 @@ export type CabinetType =
  * Тип изделия/модуля (§3). SHELVING сохранён с этапа 18 как синоним
  * стеллажа — проекты прошлых этапов продолжают открываться.
  */
+/** Ключ, под которым параметрическая модель живёт в params изделия (§90). */
+export const PARAMETRIC_KEY = 'parametric';
+
 export type FurnitureKind =
   | 'CABINET'
   | 'BASE_CABINET'
@@ -345,7 +348,9 @@ export type FurnitureKind =
   | 'SHELF_UNIT'
   | 'OPEN_SHELF'
   | 'CUSTOM'
-  | 'SHELVING';
+  | 'SHELVING'
+  /** Полка-щит: изделие из одной детали (шаблон «Полка», этап 35). */
+  | 'BOARD';
 
 export interface ParametricModel {
   /** Тип изделия (§57). */

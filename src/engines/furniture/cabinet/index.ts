@@ -1,10 +1,10 @@
 /** Публичный API параметрического шкафа. */
-export { CabinetEngine, buildCabinet, type CabinetBuildResult } from './CabinetEngine';
-export { rebuildCabinet } from './reconcile';
+export { CabinetEngine } from './CabinetEngine';
 export {
   defaultCabinetParameters,
   normalizeCabinetParameters,
   readCabinetParameters,
+  toCabinetParameters,
   type CabinetParameters,
   type TopMount,
   type BottomMount,

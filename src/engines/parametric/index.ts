@@ -68,6 +68,8 @@ export {
   computeGeometry,
   shelfOffsets,
   partitionPositions,
+  sectionBounds,
+  modelSections,
   rulesForKind,
   sideRule,
   topBottomRule,
@@ -148,6 +150,7 @@ export {
   readParametricModel,
   hasParametricModel,
   fromCabinetParameters,
+  toCabinetParameters,
   type ParametricTemplate,
 } from './templates';
 export {

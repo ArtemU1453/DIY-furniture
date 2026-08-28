@@ -13,11 +13,6 @@ export {
 export { BUILTIN_TEMPLATES, findTemplate } from './catalog';
 export { instantiateTemplate, PART_FORMULAS, type MaterialSlots } from './generate';
 export {
-  planCabinetConnections,
-  hingeCountForHeight,
-  type ConnectionPlan,
-} from './connections';
-export {
   validateTemplateValues,
   validateFormulas,
   validateTemplateGeometry,

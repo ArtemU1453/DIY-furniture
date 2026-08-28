@@ -33,6 +33,8 @@ import {
   generateParts,
   readParametricModel,
   hasParametricModel,
+  modelSections,
+  fromCabinetParameters,
   findModuleTemplate,
   moduleFromTemplate,
   mirrorPart,
@@ -196,8 +198,6 @@ import {
   type EdgeQuickAction,
 } from '@/engines/edges';
 import {
-  cabinetConnectionContext,
-  planConnections,
   pruneDeadConnections,
   reconcileConnections,
 } from '@/engines/connections';
@@ -304,7 +304,6 @@ import {
   type TemplateBinding,
   type FurnitureTemplate,
 } from '@/engines/templates';
-import type { HardwareCategory } from '@/core/model/types';
 import { createAssembly, createFurniture, createPart, createProject } from '@/core/model/factory';
 import {
   allParts,
@@ -322,11 +321,7 @@ import {
 } from '@/core/validation/catalog';
 import type { CreatePartInput } from '@/core/model/factory';
 import {
-  buildCabinet,
-  normalizeCabinetParameters,
   readCabinetParameters,
-  rebuildCabinet,
-  defaultCabinetParameters,
   type CabinetParameters,
 } from '@/engines/furniture/cabinet';
 
@@ -611,7 +606,16 @@ export interface EditorState {
   /** Прочитать параметрическую модель изделия (или вывести из старых параметров). */
   getParametricModel: (id: FurnitureId) => ParametricModel | null;
   /** Записать модель и пересобрать детали. Возвращает отчёт генератора. */
-  applyParametricModel: (id: FurnitureId, model: ParametricModel) => ParametricApplyResult;
+  /**
+   * Пересчитать изделие под модель. Необязательный patch выполняется в ТОМ ЖЕ
+   * commit — так связанные данные изделия (например привязка к шаблону)
+   * попадают в одну запись undo вместе с деталями.
+   */
+  applyParametricModel: (
+    id: FurnitureId,
+    model: ParametricModel,
+    patch?: (furniture: Furniture) => void,
+  ) => ParametricApplyResult;
   /** Выполнить команду параметрического редактора (§51). */
   runParametricCommand: (
     id: FurnitureId,
@@ -1167,18 +1171,21 @@ export const useEditorStore = create<EditorState>()(
      * их толщину с толщиной материала (мутирует переданный черновик проекта).
      */
     const syncCabinetsToMaterial = (project: Project, materialId: MaterialId) => {
+      const material = project.materials.find((m) => m.id === materialId);
+      if (!material) return;
       for (const f of project.furnitures) {
         if (f.type !== 'cabinet') continue;
-        const params = readCabinetParameters(f.params);
-        if (params.material !== materialId) continue;
-        const material = project.materials.find((m) => m.id === materialId);
-        if (!material) continue;
-        const next = normalizeCabinetParameters({ thickness: material.thickness }, params);
+        const model = readParametricModel(f);
+        if (model.materialId !== materialId) continue;
+        /* Толщина материала меняет геометрию, поэтому изделие пересобирает тот
+         * же генератор, что и все остальные пути (этап 35). */
+        const next: ParametricModel = { ...model, thickness: material.thickness };
+        const generated = generateParts(next, f.assemblies[0]?.parts ?? []);
+        if (!generated.ok) continue;
         const assembly = f.assemblies[0];
-        const built = rebuildCabinet(assembly ? assembly.parts : [], next);
-        if (assembly) assembly.parts = built.parts;
-        f.sections = built.sections;
-        f.params = next as unknown as Record<string, unknown>;
+        if (assembly) assembly.parts = generated.parts;
+        f.sections = modelSections(next);
+        f.params = { ...(f.params ?? {}), [PARAMETRIC_KEY]: next } as Record<string, unknown>;
       }
     };
 
@@ -1565,25 +1572,28 @@ export const useEditorStore = create<EditorState>()(
 
       setActiveFurniture: (id) => set((s) => void (s.activeFurnitureId = id)),
 
+      /**
+       * Создать шкаф (этап 35).
+       *
+       * Единая точка генерации: и мастер «Новый проект», и экран «Шкаф»
+       * обращаются к ОДНОМУ параметрическому генератору. Раньше здесь работал
+       * отдельный генератор прошлых этапов — он давал те же габариты, но не
+       * создавал соединений и присадки, ставил заднюю стенку с другой стороны
+       * корпуса и считал глубину полки по своей формуле.
+       */
       createCabinet: (name) => {
         const project = get().project;
-        const bodyMaterial =
-          project.materials.find((m) => m.kind === 'ldsp')?.id ??
-          project.materials[0]?.id ??
-          null;
-        const backMaterial =
-          project.materials.find((m) => m.kind === 'other')?.id ?? bodyMaterial;
-        const params = defaultCabinetParameters({ material: bodyMaterial, backMaterial });
+        const id = get().createParametricCabinet({
+          name: name ?? `Шкаф ${project.furnitures.length + 1}`,
+        });
+        if (id) return id;
 
+        /* Генератор не смог собрать шкаф (например, в проекте нет материалов):
+         * создаём пустое изделие, чтобы вызывающий код получил корректный id и
+         * мог продолжить, а не работал с несуществующим изделием. */
         const furniture = createFurniture(name ?? `Шкаф ${project.furnitures.length + 1}`);
         furniture.type = 'cabinet';
         furniture.assemblies = [createAssembly('Корпус')];
-        furniture.params = params as unknown as Record<string, unknown>;
-
-        const built = buildCabinet(params);
-        furniture.assemblies[0].parts = built.parts;
-        furniture.sections = built.sections;
-
         commit((p) => {
           p.furnitures.push(furniture);
         });
@@ -1591,19 +1601,36 @@ export const useEditorStore = create<EditorState>()(
         return furniture.id;
       },
 
-      updateCabinetParams: (id, patch) =>
-        commit((p) => {
-          const furniture = findFurniture(p, id);
-          if (!furniture || furniture.type !== 'cabinet') return;
-          const current = readCabinetParameters(furniture.params);
-          const next = normalizeCabinetParameters(patch, current);
-          const assembly = furniture.assemblies[0];
-          const existing = assembly ? assembly.parts : [];
-          const built = rebuildCabinet(existing, next);
-          if (assembly) assembly.parts = built.parts;
-          furniture.sections = built.sections;
-          furniture.params = next as unknown as Record<string, unknown>;
-        }),
+      /**
+       * Изменить габариты шкафа простыми параметрами (этап 35).
+       *
+       * Действие сохранено ради простых экранов, но пересчёт идёт через тот же
+       * параметрический движок: ключи деталей остаются стабильными, соединения
+       * и присадка перестраиваются, фурнитура не теряет родителя.
+       */
+      updateCabinetParams: (id, patch) => {
+        const model = get().getCabinetModel(id);
+        if (!model) return;
+
+        const next: Parameters<EditorState['applyCabinetPatch']>[1] = {};
+        if (patch.width != null) next.width = patch.width;
+        if (patch.height != null) next.height = patch.height;
+        if (patch.depth != null) next.depth = patch.depth;
+        if (patch.thickness != null) next.thickness = patch.thickness;
+        if (patch.material !== undefined) next.materialId = patch.material;
+        // 'overlay' — крышка поверх боковин, это ON_SIDES параметрической модели.
+        if (patch.top === 'overlay') next.construction = 'ON_SIDES';
+        else if (patch.top === 'between') next.construction = 'BETWEEN_SIDES';
+        if (patch.shelves != null) next.shelves = { ...model.shelves, count: patch.shelves };
+        if (patch.doors != null) next.doors = { ...model.doors, count: patch.doors };
+        if (patch.dividers != null) {
+          next.partitions = { ...model.partitions, count: patch.dividers };
+        }
+        if (patch.backMaterial !== undefined) {
+          next.backPanel = { ...model.backPanel, material: patch.backMaterial };
+        }
+        get().applyCabinetPatch(id, next);
+      },
 
 
       // ── Параметрический редактор ──────────────────────────────────────────
@@ -1615,7 +1642,7 @@ export const useEditorStore = create<EditorState>()(
       /* Единственный путь изменения геометрии (§50): модель → генератор →
        * ProjectModel. Всё делается одной командой commit, поэтому пересчёт
        * целиком ложится в undo/redo (§52). */
-      applyParametricModel: (id, model) => {
+      applyParametricModel: (id, model, patch) => {
         const project = get().project;
         const furniture = findFurniture(project, id);
         if (!furniture) {
@@ -1647,6 +1674,11 @@ export const useEditorStore = create<EditorState>()(
           if (assembly) assembly.parts = result.parts;
           // Модель хранится в изделии, поэтому переживает сохранение (§90).
           f.params = { ...(f.params ?? {}), [PARAMETRIC_KEY]: model } as Record<string, unknown>;
+          // Секции — производная модели (этап 35), пересчитываются вместе с деталями.
+          f.sections = modelSections(model);
+          // Фурнитура, которой требуют новые узлы, добавляется тем же commit.
+          for (const hw of result.hardware) p.hardware.push(hw);
+          patch?.(f);
 
           const ownPartIds = new Set(result.parts.map((x) => String(x.id)));
           const foreign = p.hardwareConnections.filter(
@@ -1702,6 +1734,7 @@ export const useEditorStore = create<EditorState>()(
         if (built.furniture.assemblies[0]?.parts.length === 0) return null;
 
         commit((p) => {
+          for (const hw of built.hardware) p.hardware.push(hw);
           p.furnitures.push(built.furniture);
           p.hardwareConnections = [...p.hardwareConnections, ...built.connections];
         });
@@ -2276,97 +2309,53 @@ export const useEditorStore = create<EditorState>()(
         const back = project.materials.find((m) => m.kind === 'other')?.id ?? body;
         const { params } = instantiateTemplate(template, vals, { body, back, front: body });
 
-        const furniture = createFurniture(name ?? template.name);
-        furniture.type = 'cabinet';
-        furniture.assemblies = [createAssembly('Корпус')];
-        const built = buildCabinet(params);
-        furniture.assemblies[0].parts = built.parts;
-        furniture.sections = built.sections;
-        furniture.params = params as unknown as Record<string, unknown>;
-        const binding: TemplateBinding = { templateId, generator: template.generator, values: vals };
-        furniture.metadata = { ...(furniture.metadata ?? {}), template: binding };
-
-        /* Соединения шаблонного изделия строит тот же движок правил, что и у
-         * параметрических (§1/§27): вторая система соединений не заводится,
-         * поэтому у них есть stableId, статус и источник. */
-        const ctx = cabinetConnectionContext(params);
-        const newHardware: Hardware[] = [];
-        const resolveHardware = (category: HardwareCategory): HardwareId | null => {
-          const existing = project.hardware.find((h) => h.category === category)
-            ?? newHardware.find((h) => h.category === category);
-          if (existing) return existing.id;
-          const tpl = catalogByCategory(category)[0];
-          if (!tpl) return null;
-          const hw = hardwareFromTemplate(tpl);
-          newHardware.push(hw);
-          return hw.id;
-        };
-        // Крепёж нужных категорий должен существовать до пересборки —
-        // иначе движок пропустит соединение (нет фурнитуры — нет узла).
-        for (const plan of planConnections({ ...ctx, parts: built.parts })) {
-          resolveHardware(plan.category);
+        /* Шаблон задаёт ПАРАМЕТРЫ, а детали строит тот же параметрический
+         * движок, что и мастер создания (этап 35): второй генерации нет,
+         * поэтому изделие из шаблона и изделие из мастера с одинаковыми
+         * параметрами совпадают деталь в деталь. */
+        const built = buildCabinetPure(project, fromCabinetParameters(params), name ?? template.name);
+        if ((built.furniture.assemblies[0]?.parts.length ?? 0) === 0) {
+          return {
+            ok: false,
+            errors: built.issues.length > 0
+              ? built.issues.map((i) => ({ severity: i.severity, code: i.code, message: i.message }))
+              : [{ severity: 'error' as const, code: 'tpl.empty', message: 'По этим параметрам не удалось построить изделие.' }],
+          };
         }
-        const reconciled = reconcileConnections(
-          { ...project, hardware: [...project.hardware, ...newHardware] },
-          built.parts,
-          ctx,
-        );
+        const binding: TemplateBinding = { templateId, generator: template.generator, values: vals };
+        built.furniture.metadata = { ...(built.furniture.metadata ?? {}), template: binding };
 
         commit((p) => {
-          for (const hw of newHardware) p.hardware.push(hw);
-          p.furnitures.push(furniture);
-          p.hardwareConnections = [...p.hardwareConnections, ...reconciled.connections];
+          for (const hw of built.hardware) p.hardware.push(hw);
+          p.furnitures.push(built.furniture);
+          p.hardwareConnections = [...p.hardwareConnections, ...built.connections];
         });
-        set((s) => void (s.activeFurnitureId = furniture.id));
-        return { ok: true, id: furniture.id };
+        set((s) => void (s.activeFurnitureId = built.furniture.id));
+        return { ok: true, id: built.furniture.id };
       },
 
-      updateTemplateValues: (id, values) =>
-        commit((p) => {
-          const furniture = findFurniture(p, id);
-          if (!furniture || furniture.type !== 'cabinet') return;
-          const binding = furniture.metadata?.template as TemplateBinding | undefined;
-          if (!binding || binding.detached) return;
-          const template = findTemplate(binding.templateId, loadCustomTemplates());
-          if (!template) return;
-          const merged = { ...binding.values, ...values };
-          const body = p.materials.find((m) => m.kind === 'ldsp')?.id ?? p.materials[0]?.id ?? null;
-          const back = p.materials.find((m) => m.kind === 'other')?.id ?? body;
-          const { params } = instantiateTemplate(template, merged, { body, back, front: body });
-          const assembly = furniture.assemblies[0];
-          const existing = assembly ? assembly.parts : [];
-          const built = rebuildCabinet(existing, params);
-          if (assembly) assembly.parts = built.parts;
-          furniture.sections = built.sections;
-          furniture.params = params as unknown as Record<string, unknown>;
-          furniture.metadata = { ...furniture.metadata, template: { ...binding, values: merged } };
+      updateTemplateValues: (id, values) => {
+        const project = get().project;
+        const furniture = findFurniture(project, id);
+        if (!furniture || furniture.type !== 'cabinet') return;
+        const binding = furniture.metadata?.template as TemplateBinding | undefined;
+        if (!binding || binding.detached) return;
+        const template = findTemplate(binding.templateId, loadCustomTemplates());
+        if (!template) return;
 
-          // Пересобрать соединения, порождённые шаблоном (ручные — сохранить).
-          /* Соединения пересобираются тем же движком правил, в ТОМ ЖЕ commit,
-           * что и детали (§47): stableId сохраняет id узлов, поэтому ручные
-           * правки присадки переживают смену параметров, а узлы исчезнувших
-           * деталей уходят вместе с ними (§49/§50). */
-          const ctx = cabinetConnectionContext(params);
-          const resolveHardware = (category: HardwareCategory): HardwareId | null => {
-            const existingHw = p.hardware.find((h) => h.category === category);
-            if (existingHw) return existingHw.id;
-            const tpl = catalogByCategory(category)[0];
-            if (!tpl) return null;
-            const hw = hardwareFromTemplate(tpl);
-            p.hardware.push(hw);
-            return hw.id;
-          };
-          for (const plan of planConnections({ ...ctx, parts: built.parts })) {
-            resolveHardware(plan.category);
-          }
-          const reconciled = reconcileConnections(p, built.parts, ctx);
-          // Соединения деталей ДРУГИХ изделий не трогаем.
-          const ownPartIds = new Set(built.parts.map((x) => String(x.id)));
-          const foreign = p.hardwareConnections.filter(
-            (c) => !ownPartIds.has(String(c.partAId)) && !ownPartIds.has(String(c.partBId)),
-          );
-          p.hardwareConnections = [...foreign, ...reconciled.connections];
-        }),
+        const merged = { ...binding.values, ...values };
+        const body = project.materials.find((m) => m.kind === 'ldsp')?.id ?? project.materials[0]?.id ?? null;
+        const back = project.materials.find((m) => m.kind === 'other')?.id ?? body;
+        const { params } = instantiateTemplate(template, merged, { body, back, front: body });
+
+        /* Тот же маршрут пересчёта, что и у остальных изделий (этап 35):
+         * модель → генератор → детали, соединения и присадка. Привязка к
+         * шаблону обновляется в ТОМ ЖЕ commit, поэтому undo откатывает
+         * параметры и детали вместе. */
+        get().applyParametricModel(id, fromCabinetParameters(params), (f) => {
+          f.metadata = { ...f.metadata, template: { ...binding, values: merged } };
+        });
+      },
 
       detachTemplate: (id) =>
         commit((p) => {

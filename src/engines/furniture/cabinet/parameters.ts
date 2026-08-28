@@ -5,6 +5,7 @@
  * Детали НЕ хранятся здесь: они порождаются движком из этих параметров.
  */
 import type { MaterialId } from '@/core/model/ids';
+import { createParametricModel, PARAMETRIC_KEY, type ParametricModel } from '@/core/parametric/types';
 
 /** Схема установки верха. Расширяется добавлением значений/стратегий. */
 export type TopMount = 'between' | 'overlay'; // между боковинами | поверх боковин
@@ -104,10 +105,60 @@ export function normalizeCabinetParameters(
   };
 }
 
-/** Прочитать параметры шкафа из сырых params изделия. */
+/**
+ * Обратное преобразование: параметрическая модель → CabinetParameters (этап 35).
+ *
+ * Нужно там, где интерфейс и старые проверки читают простые параметры шкафа.
+ * Это ЧТЕНИЕ, а не вторая генерация: детали по-прежнему строит один
+ * параметрический движок, здесь лишь другой взгляд на те же значения.
+ */
+export function toCabinetParameters(model: ParametricModel): CabinetParameters {
+  const BACK_BY_TYPE: Record<string, CabinetParameters['back']> = {
+    INSET: 'inset', OVERLAY: 'overlay', GROOVE: 'groove', NONE: 'none',
+  };
+  return {
+    width: model.width,
+    height: model.height,
+    depth: model.depth,
+    thickness: model.thickness,
+    material: model.materialId,
+    top: model.construction === 'ON_SIDES' ? 'overlay' : 'between',
+    // У низа своя пара значений: «под боковинами» — аналог крышки поверх.
+    bottom: model.construction === 'ON_SIDES' ? 'under' : 'between',
+    back: BACK_BY_TYPE[model.backPanel.type] ?? 'inset',
+    backMaterial: model.backPanel.material,
+    shelves: model.shelves.count,
+    dividers: model.partitions.count,
+    construction: {
+      ...DEFAULT_CONSTRUCTION,
+      backThickness: model.backPanel.thickness,
+      backOffset: model.backPanel.offset,
+      shelfDepthReduction: model.shelves.depthReduction,
+    },
+    doors: model.doors.count,
+    doorGap: model.doors.gaps.betweenGap,
+    doorOpening: model.doors.opening,
+    handleEnabled: model.doors.handleEnabled,
+    jointType: model.jointType,
+    frontMaterial: model.doors.material,
+    boardOnly: model.kind === 'BOARD',
+  };
+}
+
+/**
+ * Прочитать параметры шкафа из сырых params изделия.
+ *
+ * Источник истины — параметрическая модель (этап 35): если она есть, простые
+ * параметры ВЫВОДЯТСЯ из неё, а не читаются как вторая копия, которая может
+ * разойтись с деталями. Старые проекты без модели читаются как раньше (§91).
+ */
 export function readCabinetParameters(
   params: Record<string, unknown> | undefined,
 ): CabinetParameters {
+  const stored = params?.[PARAMETRIC_KEY];
+  if (stored && typeof stored === 'object') {
+    return toCabinetParameters(createParametricModel(stored as Partial<ParametricModel>));
+  }
   const base = defaultCabinetParameters();
   return normalizeCabinetParameters(params as Partial<CabinetParameters> | undefined, base);
 }

@@ -23,13 +23,13 @@ describe('Store — параметрический шкаф', () => {
   it('изменение ширины пересчитывает детали, сохраняя стабильные id', () => {
     const id = useEditorStore.getState().createCabinet();
     const before = activeCabinet().assemblies[0].parts;
-    const sideBefore = before.find((p) => p.metadata?.key === 'side_left')!;
+    const sideBefore = before.find((p) => p.metadata?.partType === 'side_left')!;
 
     useEditorStore.getState().updateCabinetParams(id, { width: 1000 });
 
     const after = activeCabinet().assemblies[0].parts;
-    const sideAfter = after.find((p) => p.metadata?.key === 'side_left')!;
-    const topAfter = after.find((p) => p.metadata?.key === 'top')!;
+    const sideAfter = after.find((p) => p.metadata?.partType === 'side_left')!;
+    const topAfter = after.find((p) => p.metadata?.partType === 'top')!;
 
     expect(sideAfter.id).toBe(sideBefore.id); // стабильный id
     expect(Math.max(topAfter.width, topAfter.height)).toBe(968); // пересчитано
@@ -76,7 +76,12 @@ describe('Store — параметрический шкаф', () => {
     const json = serializeProject(useEditorStore.getState().project);
     const obj = JSON.parse(json);
     const cab = obj.furnitures.find((f: { id: string }) => f.id === id);
-    expect(cab.params.width).toBe(800);
-    expect(cab.params.construction).toBeDefined();
+    // Источник истины — параметрическая модель изделия (этап 35).
+    expect(cab.params.parametric.width).toBe(800);
+    expect(cab.params.parametric.thickness).toBeGreaterThan(0);
+    // Простые параметры шкафа выводятся из неё без потери смысла.
+    const params = readCabinetParameters(cab.params);
+    expect(params.width).toBe(800);
+    expect(params.construction).toBeDefined();
   });
 });

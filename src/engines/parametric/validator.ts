@@ -68,6 +68,10 @@ export function validateGeometry(model: ParametricModel): ParametricIssue[] {
   const issues: ParametricIssue[] = [];
   const t = model.thickness;
 
+  /* Полка-щит состоит из одной детали: у неё нет внутреннего пространства,
+   * полок и перегородок, поэтому корпусные проверки к ней неприменимы. */
+  if (model.kind === 'BOARD') return issues;
+
   const innerWidth = model.width - 2 * t;
   const innerHeight = model.height - 2 * t;
   if (innerWidth < MIN_PART_SIZE) {

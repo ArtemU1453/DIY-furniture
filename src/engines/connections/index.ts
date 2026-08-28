@@ -42,6 +42,7 @@ export {
 
 export {
   reconcileConnections,
+  ensureConnectionHardware,
   pruneDeadConnections,
   affectedConnections,
   connectionSource,

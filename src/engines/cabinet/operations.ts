@@ -6,7 +6,7 @@
  * они возвращают новые данные, а записывает их store одной командой, поэтому
  * любая из операций целиком ложится в undo/redo (§116/§117).
  */
-import type { Furniture, HardwareConnection, Part, Project } from '@/core/model/types';
+import type { Furniture, Hardware, HardwareConnection, Part, Project } from '@/core/model/types';
 import type { FurnitureId } from '@/core/model/ids';
 import { newAssemblyId, newFurnitureId, newHardwareConnectionId, newPartId } from '@/core/model/ids';
 import { createFurniture, createAssembly } from '@/core/model/factory';
@@ -14,7 +14,8 @@ import { findFurniture } from '@/core/model/selectors';
 import type { ParametricModel } from '@/core/parametric/types';
 import { PARAMETRIC_KEY } from '@/engines/parametric/templates';
 import { generateParts } from '@/engines/parametric/generator';
-import { reconcileConnections } from '@/engines/connections/reconcile';
+import { modelSections } from '@/engines/parametric/rules';
+import { ensureConnectionHardware, reconcileConnections } from '@/engines/connections/reconcile';
 import { toCabinetModel, type CabinetModel } from './model';
 import { checkCabinet, type CabinetIssue } from './collision';
 
@@ -24,6 +25,8 @@ export const CABINET_CLIPBOARD_VERSION = 1;
 export interface CabinetBuild {
   furniture: Furniture;
   connections: HardwareConnection[];
+  /** Фурнитура, которой в проекте не было, но она нужна соединениям. */
+  hardware: Hardware[];
   issues: CabinetIssue[];
   ok: boolean;
 }
@@ -45,19 +48,32 @@ export function buildCabinet(
   const generated = generateParts(resolved, []);
   if (!generated.ok) {
     return {
-      furniture, connections: [], ok: false,
+      furniture, connections: [], hardware: [], ok: false,
       issues: generated.issues.map((i) => ({ severity: i.severity, code: i.code, message: i.message })),
     };
   }
   if (furniture.assemblies[0]) furniture.assemblies[0].parts = generated.parts;
+  // Секции — производная модели, а не отдельно хранимая правда (этап 35).
+  furniture.sections = modelSections(resolved);
 
-  const reconciled = reconcileConnections(project, generated.parts, {
+  const ctx = {
     jointCategory: resolved.jointType,
     construction: resolved.construction,
     handles: resolved.doors.handleEnabled,
-  });
+  };
+  /* Фурнитура добирается ДО соединений: без неё правило молча пропустит узел,
+   * и мастер дал бы меньше соединений, чем шаблон (этап 35). */
+  const hardware = ensureConnectionHardware(project, generated.parts, ctx);
+  const withHardware = hardware.length === 0
+    ? project
+    : { ...project, hardware: [...project.hardware, ...hardware] };
+
+  const reconciled = reconcileConnections(withHardware, generated.parts, ctx);
   const check = checkCabinet(project, resolved, generated.parts);
-  return { furniture, connections: reconciled.connections, issues: check.issues, ok: check.ok };
+  return {
+    furniture, connections: reconciled.connections, hardware,
+    issues: check.issues, ok: check.ok,
+  };
 }
 
 /** Краткая сводка будущего изделия для предпросмотра (§93). */
