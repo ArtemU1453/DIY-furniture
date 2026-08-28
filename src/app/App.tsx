@@ -20,6 +20,7 @@ import { ModulesView } from '@/components/panels/ModulesView';
 import { Editor2DView } from '@/components/panels/Editor2DView';
 import { ConnectionsView } from '@/components/panels/ConnectionsView';
 import { CabinetDesigner } from '@/components/panels/CabinetDesigner';
+import { InteractiveEditor } from '@/components/panels/InteractiveEditor';
 import { ParametricPanel } from '@/components/panels/ParametricPanel';
 import { Scene3D, type CameraApi } from '@/features/designer/Scene3D';
 import { ModelTree } from '@/components/panels/ModelTree';
@@ -31,7 +32,7 @@ import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { saveCurrentProject } from '@/features/project/projectActions';
 
-type CenterView = '3d' | 'editor2d' | 'cabinet' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'modules';
+type CenterView = '3d' | 'editor2d' | 'interactive' | 'cabinet' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'modules';
 type ViewMode = '3d' | '2d' | 'split';
 
 export function App() {
@@ -129,6 +130,7 @@ export function App() {
               ['connections', 'Соединения'],
               ['machining', 'Присадка'],
               ['cutting', 'Раскрой'],
+              ['interactive', 'Редактор'],
               ['cabinet', 'Шкаф'],
               ['modules', 'Модули'],
               ['parametric', 'Параметры'],
@@ -238,6 +240,9 @@ export function App() {
               onOpenIn3D={(partId) => { selectPart(partId); setCenterView('3d'); }}
               onOpenPart={(partId) => { selectPart(partId); setCenterView('table'); }}
             />
+          )}
+          {centerView === 'interactive' && (
+            <InteractiveEditor onOpen3D={() => setCenterView('3d')} />
           )}
           {centerView === 'cabinet' && (
             <CabinetDesigner

@@ -298,7 +298,12 @@ export function Scene3D({
   const selectedPartId = useEditorStore((s) => s.selectedPartId);
   const selectedConnectionId = useEditorStore((s) => s.selectedConnectionId);
   const selectedOperationId = useEditorStore((s) => s.selectedOperationId);
-  const selectPart = useEditorStore((s) => s.selectPart);
+  /* Выделение общее для 2D и 3D (§96–§98 этапа 29): 3D читает тот же список
+   * идентификаторов, что и плоский вид и панель свойств. */
+  const interaction = useEditorStore((s) => s.interaction);
+  const selectEntity = useEditorStore((s) => s.selectEntity);
+  const hoverEntity = useEditorStore((s) => s.hoverEntity);
+  const clearInteractionSelection = useEditorStore((s) => s.clearInteractionSelection);
   const selectOperation = useEditorStore((s) => s.selectOperation);
   const updatePart = useEditorStore((s) => s.updatePart);
   const focusNonce = useEditorStore((s) => s.focusNonce);
@@ -318,6 +323,13 @@ export function Scene3D({
     [allVisible, viewer.isolatedPartId],
   );
   const assembly = useEditorStore((s) => s.assembly);
+  /* Подсветка: выбранные детали плюс совместимость с одиночным выбором
+   * прошлых этапов — панель свойств по-прежнему работает с selectedPartId. */
+  const selectedIds = useMemo(() => {
+    const ids = new Set(interaction.selection.ids);
+    if (selectedPartId) ids.add(String(selectedPartId));
+    return ids;
+  }, [interaction.selection.ids, selectedPartId]);
 
   /* §146–§148: разнесённый вид — это ПРЕДСТАВЛЕНИЕ. Смещение считается на
    * лету и подмешивается в копию детали для отрисовки; ProjectModel и все
@@ -399,7 +411,7 @@ export function Scene3D({
         {viewer.showAxes && <axesHelper args={[1.5]} />}
 
         {/* Клик по пустому месту снимает выбор. */}
-        <mesh position={[0, -0.001, 0]} rotation={[-Math.PI / 2, 0, 0]} onClick={() => selectPart(null)} visible={false}>
+        <mesh position={[0, -0.001, 0]} rotation={[-Math.PI / 2, 0, 0]} onClick={() => clearInteractionSelection()} visible={false}>
           <planeGeometry args={[100, 100]} />
           <meshBasicMaterial />
         </mesh>
@@ -409,11 +421,13 @@ export function Scene3D({
             key={part.id}
             part={part}
             material={part.material ? materialMap.get(part.material) : undefined}
-            selected={part.id === selectedPartId}
+            selected={selectedIds.has(String(part.id))}
+            hovered={interaction.selection.hovered === String(part.id)}
             showNumber={showNumbers}
             displayMode={viewer.displayMode}
             edgeColorOf={edgeColorOf}
-            onSelect={selectPart}
+            onSelect={(id, additive) => selectEntity(String(id), { additive })}
+            onHover={(id) => hoverEntity(id === null ? null : String(id))}
           />
         ))}
 

@@ -16,10 +16,14 @@ interface Props {
   part: Part;
   material?: Material;
   selected: boolean;
+  /** Предварительная подсветка под курсором (§11 этапа 29). */
+  hovered?: boolean;
   showNumber?: boolean;
   displayMode?: DisplayMode;
   edgeColorOf?: (id: EdgeMaterialId | null) => string | undefined;
-  onSelect: (id: Part['id']) => void;
+  /** additive — клик с Ctrl/Cmd: добавить к выделению (§3 этапа 29). */
+  onSelect: (id: Part['id'], additive?: boolean) => void;
+  onHover?: (id: Part['id'] | null) => void;
 }
 
 /**
@@ -27,7 +31,7 @@ interface Props {
  * (Part → partBoxGeometry → BoxGeometry). Изменение размеров детали
  * автоматически меняет визуальный размер (пересчёт useMemo по зависимостям).
  */
-export function PartMesh({ part, material, selected, showNumber, displayMode = 'solid', edgeColorOf, onSelect }: Props) {
+export function PartMesh({ part, material, selected, hovered = false, showNumber, displayMode = 'solid', edgeColorOf, onSelect, onHover }: Props) {
   const geom = useMemo(() => partBoxGeometry(part), [part]);
   const wireframe = displayMode === 'wireframe';
   const transparent = displayMode === 'transparent';
@@ -55,7 +59,7 @@ export function PartMesh({ part, material, selected, showNumber, displayMode = '
 
   const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
-    onSelect(part.id);
+    onSelect(part.id, e.ctrlKey || e.metaKey);
   };
 
   return (
@@ -67,6 +71,8 @@ export function PartMesh({ part, material, selected, showNumber, displayMode = '
       ]}
       rotation={[geom.rotation.x, geom.rotation.y, geom.rotation.z]}
       onClick={handleClick}
+      onPointerOver={onHover ? (e) => { e.stopPropagation(); onHover(part.id); } : undefined}
+      onPointerOut={onHover ? () => onHover(null) : undefined}
     >
       <boxGeometry
         args={[
@@ -77,8 +83,8 @@ export function PartMesh({ part, material, selected, showNumber, displayMode = '
       />
       <meshStandardMaterial
         color={color}
-        emissive={selected ? '#4c8dff' : '#000000'}
-        emissiveIntensity={selected ? 0.5 : 0}
+        emissive={selected ? '#4c8dff' : hovered ? '#6f7d92' : '#000000'}
+        emissiveIntensity={selected ? 0.5 : hovered ? 0.25 : 0}
         roughness={0.75}
         metalness={0.05}
         wireframe={wireframe}
@@ -88,7 +94,7 @@ export function PartMesh({ part, material, selected, showNumber, displayMode = '
       {showEdges && (
         <lineSegments>
           <edgesGeometry args={[new THREE.BoxGeometry(w, h, t)]} />
-          <lineBasicMaterial color={selected ? '#4c8dff' : '#1a1b1e'} />
+          <lineBasicMaterial color={selected ? '#4c8dff' : hovered ? '#8aa0bf' : '#1a1b1e'} />
         </lineSegments>
       )}
       {edgeStrips.map((s) => (
