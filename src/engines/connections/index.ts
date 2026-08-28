@@ -61,3 +61,16 @@ export {
 
 export { connectionsCsv } from './csv';
 export { cabinetConnectionContext } from './cabinetContext';
+
+// ── Этап 27: жизненный цикл узла и пресеты соединений ──
+export {
+  CONNECTION_RULE_VERSION, applyConnections, connectionStatus, isDirty, isOutdated,
+  markDirty as markConnectionDirty, partsSignature, refreshConnectionStatuses,
+  snapshotOfConnection, withPartsSignature,
+} from './lifecycle';
+export {
+  BUILT_IN_CONNECTION_PRESETS, allConnectionPresets, connectionRemovalImpact,
+  createConnection, findConnectionPreset, hardwareForPreset,
+  type ConnectionPreset, type ConnectionRemovalImpact, type CreateConnectionInput,
+  type CreateConnectionResult,
+} from './presets';

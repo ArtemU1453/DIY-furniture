@@ -102,6 +102,11 @@ import { newSheetMaterialId, newStoredRemnantId } from '@/core/model/ids';
 import { runCuttingInWorker, type CuttingHandle } from '@/workers/cuttingClient';
 import type { CuttingProgress } from '@/engines/cutting';
 import {
+  findHardwareTemplate,
+  hardwareFromTemplateSpec,
+} from '@/engines/hardware';
+import { createConnection, findConnectionPreset } from '@/engines/connections';
+import {
   DEFAULT_EDITOR_2D,
   buildEntities,
   copyEntities,
@@ -310,6 +315,11 @@ export interface EditorState {
   constraints: Constraint2D[];
   /** Внутренний буфер обмена редактора (§80). */
   clipboard: ReturnType<typeof copyEntities> | null;
+  /**
+   * Режим просмотра сборки (§146–§148). Это состояние ИНТЕРФЕЙСА: разнос
+   * считается на лету и на конструкцию не влияет.
+   */
+  assembly: { mode: 'ASSEMBLY' | 'EXPLODED'; factor: number };
 
   // ── Проект ────────────────────────────────────────────────────────────────
   newProject: (name?: string) => void;
@@ -520,6 +530,26 @@ export interface EditorState {
   /** «Сбросить правило» — удалить ручную правку, операция снова из правила (§43). */
   resetOperationToRule: (id: MachiningId) => void;
   /** Сменить способ соединения (CONFIRMAT/DOWEL/…) — подбирает крепёж (§65/§66). */
+  /** Ручная правка количества крепежа в узле (§134/§135). */
+  setConnectionQuantityOverride: (id: HardwareConnectionId, quantity: number | null) => void;
+  /** Создать узел по пресету или вручную (§125/§126). */
+  createConnectionFrom: (input: {
+    partAId: PartId; partBId: PartId; presetId?: string;
+    type?: ConnectionType; hardwareId?: HardwareId; quantity?: number;
+  }) => { ok: boolean; id?: HardwareConnectionId; error?: string; warnings: string[] };
+  /** Создать позицию каталога из шаблона (§105). */
+  createHardwareFromTemplate: (templateId: string, name?: string) => HardwareId | null;
+  /** Отправить позицию в архив или вернуть (§153–§155). */
+  setHardwareArchived: (id: HardwareId, archived: boolean) => void;
+  /** Дублировать позицию каталога с новым id (§152). */
+  duplicateHardware: (id: HardwareId) => HardwareId | null;
+  /** Добавить единицу фурнитуры без соединения (§132). */
+  addManualHardwareInstance: (input: {
+    hardwareId: HardwareId; partId: PartId; quantity?: number;
+  }) => string | null;
+  removeManualHardwareInstance: (id: string) => void;
+  /** Режим 3D: собранное изделие или разнесённый вид (§146–§148). */
+  setAssemblyMode: (mode: 'ASSEMBLY' | 'EXPLODED', factor?: number) => void;
   setConnectionType: (id: HardwareConnectionId, type: ConnectionType) => void;
 
   // ── Фурнитура (этап 22) ───────────────────────────────────────────────────
@@ -689,6 +719,7 @@ export const useEditorStore = create<EditorState>()(
       },
       constraints: [],
       clipboard: null,
+      assembly: { mode: 'ASSEMBLY', factor: 1 },
 
       setViewer: (patch) => set((s) => void Object.assign(s.viewer, patch)),
 
@@ -1821,6 +1852,106 @@ export const useEditorStore = create<EditorState>()(
         }),
 
       addHardware: (hardware) => commit((p) => void p.hardware.push(hardware)),
+
+      // ── Этап 27: фурнитура и соединения ──────────────────────────────────
+      /* §134/§135: ручное количество не стирает расчёт правила, а перекрывает
+       * его. Передача null — сброс (§136), после которого снова действует
+       * вычисленное значение. */
+      setConnectionQuantityOverride: (id, quantity) =>
+        commit((p) => {
+          const connection = p.hardwareConnections.find((c) => c.id === id);
+          if (!connection) return;
+          if (quantity == null || !Number.isFinite(quantity) || quantity < 0) {
+            delete connection.quantityOverride;
+          } else {
+            connection.quantityOverride = Math.round(quantity);
+          }
+        }),
+
+      createConnectionFrom: (input) => {
+        const project = get().project;
+        const partA = findPart(project, input.partAId);
+        const partB = findPart(project, input.partBId);
+        if (!partA || !partB) {
+          return { ok: false, error: 'Одна из деталей не найдена.', warnings: [] };
+        }
+        const preset = input.presetId ? findConnectionPreset(project, input.presetId) : undefined;
+        const id = newHardwareConnectionId();
+        const result = createConnection(
+          project,
+          { partA, partB, preset, type: input.type, hardwareId: input.hardwareId, quantity: input.quantity },
+          id,
+        );
+        // §21: несовместимый узел не создаётся вовсе — модель не портится.
+        if (!result.connection) return { ok: false, error: result.error, warnings: result.warnings };
+        commit((p) => void p.hardwareConnections.push(result.connection!));
+        return { ok: true, id, warnings: result.warnings };
+      },
+
+      createHardwareFromTemplate: (templateId, name) => {
+        const template = findHardwareTemplate(templateId);
+        if (!template) return null;
+        const id = newHardwareId();
+        const hardware = hardwareFromTemplateSpec(template, id, name ? { name } : {});
+        commit((p) => void p.hardware.push(hardware));
+        return id;
+      },
+
+      /* §153: позиция, на которую ссылаются узлы, физически не удаляется —
+       * иначе соединения остались бы с «висящей» ссылкой. Она уходит в архив
+       * (§154) и может быть возвращена (§155). */
+      setHardwareArchived: (id, archived) =>
+        commit((p) => {
+          const hardware = p.hardware.find((h) => h.id === id);
+          if (hardware) hardware.archived = archived;
+        }),
+
+      duplicateHardware: (id) => {
+        const source = get().project.hardware.find((h) => h.id === id);
+        if (!source) return null;
+        const copy: Hardware = {
+          ...JSON.parse(JSON.stringify(source)) as Hardware,
+          id: newHardwareId(),
+          name: `${source.name} (копия)`,
+          archived: false,
+        };
+        commit((p) => void p.hardware.push(copy));
+        return copy.id;
+      },
+
+      addManualHardwareInstance: (input) => {
+        const project = get().project;
+        if (!project.hardware.some((h) => h.id === input.hardwareId)) return null;
+        if (!findPart(project, input.partId)) return null;
+        const id = `manual:${input.partId}:${Date.now().toString(36)}`;
+        commit((p) => {
+          const list = p.hardwareInstances ?? [];
+          list.push({
+            id,
+            hardwareId: input.hardwareId,
+            partId: input.partId,
+            quantity: Math.max(1, Math.round(input.quantity ?? 1)),
+            source: 'manual',
+          });
+          p.hardwareInstances = list;
+        });
+        return id;
+      },
+
+      removeManualHardwareInstance: (id) =>
+        commit((p) => {
+          p.hardwareInstances = (p.hardwareInstances ?? []).filter((x) => x.id !== id);
+        }),
+
+      // Режим просмотра — состояние интерфейса, в историю не пишется (§146).
+      setAssemblyMode: (mode, factor) =>
+        set((s) => {
+          s.assembly.mode = mode;
+          if (factor != null && Number.isFinite(factor)) {
+            s.assembly.factor = Math.max(0, Math.min(1, factor));
+          }
+        }),
+
 
       updateHardware: (id, patch) =>
         commit((p) => {
