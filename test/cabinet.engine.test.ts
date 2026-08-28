@@ -88,11 +88,18 @@ describe('Генерация деталей корпуса', () => {
     expect(keyed(b, 'side_left').thickness).toBe(18);
   });
 
-  it('схема «поверх боковин» укорачивает боковины и уширяет верх', () => {
+  it('схема «верх поверх боковин» укорачивает боковину сверху и уширяет верх', () => {
+    // Задан только верх: низ остаётся между боковинами (этап 37).
     const b = build(base({ top: 'overlay' }));
-    // В единой модели крышка И дно ложатся поверх боковин: H − 2T.
-    expect(planeLength(keyed(b, 'side_left'))).toBe(2000 - 2 * 16);
+    expect(planeLength(keyed(b, 'side_left'))).toBe(2000 - 16); // H − T
     expect(planeLength(keyed(b, 'top'))).toBe(800); // на всю ширину
+    expect(planeLength(keyed(b, 'bottom'))).toBe(800 - 2 * 16); // низ между боковинами
+
+    // Обе схемы сразу: боковина короче с двух сторон, обе плиты во всю ширину.
+    const both = build(base({ top: 'overlay', bottom: 'under' }));
+    expect(planeLength(keyed(both, 'side_left'))).toBe(2000 - 2 * 16);
+    expect(planeLength(keyed(both, 'top'))).toBe(800);
+    expect(planeLength(keyed(both, 'bottom'))).toBe(800);
   });
 
   it('задняя стенка — реальная деталь со своей толщиной', () => {

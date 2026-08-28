@@ -65,12 +65,58 @@ export const DEFAULT_LIMITS: DimensionLimits = {
 // ── Схема корпуса (§21) ──────────────────────────────────────────────────────
 
 /**
- * BETWEEN_SIDES — верх и низ входят МЕЖДУ боковинами (боковины во всю высоту).
- * ON_SIDES      — верх и низ лежат НА боковинах (накрывают их сверху/снизу).
+ * Схема установки верха и низа относительно боковин.
  *
- * Правила этих схем не смешиваются: каждая считает свои размеры и позиции.
+ * BETWEEN_SIDES — верх и низ входят МЕЖДУ боковинами (боковины во всю высоту).
+ * ON_SIDES      — верх и низ накрывают боковины сверху и снизу.
+ * TOP_ON_SIDES  — накрывает только верх, низ входит между боковинами.
+ * BOTTOM_UNDER  — только низ подложен под боковины, верх входит между ними.
+ *
+ * Смешанные схемы существуют в реальной мебели и были в проектах прошлых
+ * этапов, где верх и низ настраивались независимо (этап 37). Хранится ОДНО
+ * поле: две независимые величины выводятся из него, а не дублируют его.
  */
-export type CabinetConstructionType = 'BETWEEN_SIDES' | 'ON_SIDES';
+export type CabinetConstructionType =
+  | 'BETWEEN_SIDES'
+  | 'ON_SIDES'
+  | 'TOP_ON_SIDES'
+  | 'BOTTOM_UNDER';
+
+/** Подписи схем корпуса: один список на все панели (этап 37). */
+export const CONSTRUCTION_LABELS: Record<CabinetConstructionType, string> = {
+  BETWEEN_SIDES: 'Верх и низ между боковинами',
+  ON_SIDES: 'Верх и низ на боковинах',
+  TOP_ON_SIDES: 'Только верх на боковинах',
+  BOTTOM_UNDER: 'Только низ под боковинами',
+};
+
+/** Порядок показа схем в списках. */
+export const CONSTRUCTION_ORDER: CabinetConstructionType[] = [
+  'BETWEEN_SIDES', 'ON_SIDES', 'TOP_ON_SIDES', 'BOTTOM_UNDER',
+];
+
+/** Что схема означает для геометрии: накрывает ли верх боковины, подложен ли низ. */
+export interface ConstructionMounts {
+  /** Верх лежит НА боковинах (иначе — между ними). */
+  topOnSides: boolean;
+  /** Низ подложен ПОД боковины (иначе — между ними). */
+  bottomUnder: boolean;
+}
+
+export function constructionMounts(construction: CabinetConstructionType): ConstructionMounts {
+  return {
+    topOnSides: construction === 'ON_SIDES' || construction === 'TOP_ON_SIDES',
+    bottomUnder: construction === 'ON_SIDES' || construction === 'BOTTOM_UNDER',
+  };
+}
+
+/** Обратное преобразование: пара признаков → схема корпуса. */
+export function constructionOf(mounts: ConstructionMounts): CabinetConstructionType {
+  if (mounts.topOnSides && mounts.bottomUnder) return 'ON_SIDES';
+  if (mounts.topOnSides) return 'TOP_ON_SIDES';
+  if (mounts.bottomUnder) return 'BOTTOM_UNDER';
+  return 'BETWEEN_SIDES';
+}
 
 // ── Полки (§22–§26) ──────────────────────────────────────────────────────────
 

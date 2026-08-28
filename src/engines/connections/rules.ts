@@ -12,6 +12,7 @@
  * конструкция работает с любым крепежом из библиотеки.
  */
 import type { HardwareCategory, Part, PartRole } from '@/core/model/types';
+import { constructionMounts, type CabinetConstructionType } from '@/core/parametric/types';
 import { connectionStableId, partKey } from './identity';
 
 /** Контекст, в котором применяются правила. */
@@ -19,8 +20,8 @@ export interface ConnectionRuleContext {
   parts: Part[];
   /** Категория корпусного крепежа: confirmat / dowel / minifix / connector. */
   jointCategory: HardwareCategory;
-  /** Схема корпуса (§30–§32). */
-  construction: 'BETWEEN_SIDES' | 'ON_SIDES';
+  /** Схема корпуса (§30–§32); допускает и смешанные схемы (этап 37). */
+  construction: CabinetConstructionType;
   /** Ставить ли ручки на фасады. */
   handles: boolean;
   /** Пороги числа петель — из производственного профиля (§37). */
@@ -183,12 +184,15 @@ export const carcassRule: ConnectionRule = {
     const { left, right } = sides(ctx.parts);
     const tops = [...byRole(ctx.parts, 'top'), ...byRole(ctx.parts, 'bottom')];
     const out: ConnectionPlanItem[] = [];
+    const mounts = constructionMounts(ctx.construction);
     for (const horiz of tops) {
       const span = Math.max(horiz.width, horiz.height);
       const count = Math.min(fastenersForSpan(span), 3);
-      // Позиция различает узлы: одна и та же пара деталей стыкуется один раз,
-      // но для схемы ON_SIDES полезно знать, кто проходной.
-      const position = ctx.construction === 'ON_SIDES' ? 'on-sides' : 'between-sides';
+      /* Позиция различает узлы: одна и та же пара деталей стыкуется один раз,
+       * но полезно знать, кто проходной. Верх и низ смотрятся отдельно —
+       * в смешанной схеме они закреплены по-разному (этап 37). */
+      const onSides = horiz.role === 'top' ? mounts.topOnSides : mounts.bottomUnder;
+      const position = onSides ? 'on-sides' : 'between-sides';
       if (left) out.push(plan(this.id, ctx.jointCategory, horiz, left, count, position));
       if (right) out.push(plan(this.id, ctx.jointCategory, horiz, right, count, position));
     }

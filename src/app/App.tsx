@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useEditorStore } from './store/editorStore';
 import { TopBar } from '@/components/layout/TopBar';
 import { LeftPanel, type NavSection } from '@/components/layout/LeftPanel';
@@ -14,21 +14,13 @@ import { PartsTable } from '@/components/panels/PartsTable';
 import { MaterialsView } from '@/components/panels/MaterialsView';
 import { HardwareView } from '@/components/panels/HardwareView';
 import { MachiningView } from '@/components/panels/MachiningView';
-import { CuttingView } from '@/components/panels/CuttingView';
-import { DocumentsView } from '@/components/panels/DocumentsView';
-import { LibraryView } from '@/components/panels/LibraryView';
 import { ProductionView } from '@/components/panels/ProductionView';
 import { ModulesView } from '@/components/panels/ModulesView';
-import { Editor2DView } from '@/components/panels/Editor2DView';
 import { ConnectionsView } from '@/components/panels/ConnectionsView';
 import { CabinetDesigner } from '@/components/panels/CabinetDesigner';
-import { InteractiveEditor } from '@/components/panels/InteractiveEditor';
 import { CuttingPrep } from '@/components/panels/CuttingPrep';
-import { ProductionCenter } from '@/components/panels/ProductionCenter';
-import { HardwareCatalogView } from '@/components/panels/HardwareCatalogView';
-import { Viewer3D } from '@/components/panels/Viewer3D';
 import { ParametricPanel } from '@/components/panels/ParametricPanel';
-import { Scene3D, type CameraApi } from '@/features/designer/Scene3D';
+import { Scene3D, useScene3DPreload, type CameraApi } from '@/features/designer/Scene3DLazy';
 import { ModelTree } from '@/components/panels/ModelTree';
 import { PartProperties } from '@/components/panels/PartProperties';
 import { EditorToolbar } from '@/components/panels/EditorToolbar';
@@ -38,6 +30,57 @@ import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { loadLastProject } from '@/storage/project/projectRepository';
 import { saveCurrentProject } from '@/features/project/projectActions';
+
+/* Тяжёлые разделы грузятся отдельными кусками сборки (этап 37): первый
+ * экран не тянет то, что пользователь может не открыть. Куски лежат рядом
+ * с приложением, поэтому всё остаётся локальным. */
+const loadDocumentsView = () => import('@/components/panels/DocumentsView');
+const loadLibraryView = () => import('@/components/panels/LibraryView');
+const loadProductionCenter = () => import('@/components/panels/ProductionCenter');
+const loadHardwareCatalogView = () => import('@/components/panels/HardwareCatalogView');
+const loadEditor2DView = () => import('@/components/panels/Editor2DView');
+const loadCuttingView = () => import('@/components/panels/CuttingView');
+const loadViewer3D = () => import('@/components/panels/Viewer3D');
+const loadInteractiveEditor = () => import('@/components/panels/InteractiveEditor');
+
+const DocumentsView = lazy(async () => ({ default: (await loadDocumentsView()).DocumentsView }));
+const LibraryView = lazy(async () => ({ default: (await loadLibraryView()).LibraryView }));
+const ProductionCenter = lazy(async () => ({ default: (await loadProductionCenter()).ProductionCenter }));
+const HardwareCatalogView = lazy(async () => ({ default: (await loadHardwareCatalogView()).HardwareCatalogView }));
+const Editor2DView = lazy(async () => ({ default: (await loadEditor2DView()).Editor2DView }));
+const CuttingView = lazy(async () => ({ default: (await loadCuttingView()).CuttingView }));
+const Viewer3D = lazy(async () => ({ default: (await loadViewer3D()).Viewer3D }));
+const InteractiveEditor = lazy(async () => ({ default: (await loadInteractiveEditor()).InteractiveEditor }));
+
+/**
+ * Фоновая подгрузка разделов после первой отрисовки.
+ *
+ * Разделение сборки не должно стоить работы без сети: как только браузер
+ * освободился, все куски уже лежат в кэше, и переход в раздел не зависит от
+ * соединения (этап 37).
+ */
+function usePanelPreload(): void {
+  useEffect(() => {
+    const loaders = [loadDocumentsView, loadLibraryView, loadProductionCenter, loadHardwareCatalogView, loadEditor2DView, loadCuttingView, loadViewer3D, loadInteractiveEditor];
+    let index = 0;
+    const next = () => {
+      if (index >= loaders.length) return;
+      void loaders[index++]().finally(() => window.setTimeout(next, 60));
+    };
+    const idle = window.requestIdleCallback?.bind(window);
+    if (idle) {
+      const handle = idle(() => next());
+      return () => window.cancelIdleCallback?.(handle);
+    }
+    const timer = window.setTimeout(next, 800);
+    return () => window.clearTimeout(timer);
+  }, []);
+}
+
+
+
+
+
 
 type CenterView = '3d' | 'editor2d' | 'interactive' | 'cabinet' | 'cuttingPrep' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'productionCenter' | 'modules' | 'hardwareCatalog' | 'viewer3d';
 type ViewMode = '3d' | '2d' | 'split';
@@ -83,6 +126,10 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
+
+  // 3D и разделы грузятся отдельными кусками; подтягиваем их в фоне (этап 37).
+  useScene3DPreload();
+  usePanelPreload();
 
   const project = useEditorStore((s) => s.project);
   const selectPart = useEditorStore((s) => s.selectPart);
@@ -247,6 +294,7 @@ export function App() {
         {/* Сбой раздела не должен обнулять приложение: key сбрасывает границу
             при переходе в другой раздел (этап 35). */}
         <ErrorBoundary key={centerView} title={CENTER_VIEW_LABELS[centerView]}>
+        <Suspense fallback={<div className="empty-hint" style={{ padding: 20 }}>Загрузка раздела…</div>}>
         <div className="center-body">
           {/* Первый экран пустого проекта: понятный следующий шаг (этап 35). */}
           {centerView === '3d' && allParts(project).length === 0 ? (
@@ -362,6 +410,7 @@ export function App() {
             />
           )}
         </div>
+        </Suspense>
         </ErrorBoundary>
       </div>
       <RightPanel />

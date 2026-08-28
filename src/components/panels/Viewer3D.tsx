@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEditorStore } from '@/app/store/editorStore';
-import { Scene3D } from '@/features/designer/Scene3D';
+import { Scene3D } from '@/features/designer/Scene3DLazy';
 import {
   SCENE_VIEWS,
   SCENE_VIEW_LABELS,

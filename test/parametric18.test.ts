@@ -992,7 +992,9 @@ describe('Параметрика 18 — интеграция и совмести
     expect(restored.doors.gaps.betweenGap).toBe(4);
     expect(restored.backPanel.type).toBe('OVERLAY');
     expect(restored.backPanel.thickness).toBe(4);
-    expect(restored.construction).toBe('ON_SIDES');
+    /* В старых параметрах задан только верх (top: 'overlay'), низ остался
+     * между боковинами — схема смешанная и сохраняется как есть (этап 37). */
+    expect(restored.construction).toBe('TOP_ON_SIDES');
     expect(restored.jointType).toBe('dowel');
 
     // Из восстановленной модели строятся детали — проект работает.

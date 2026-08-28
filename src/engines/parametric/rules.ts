@@ -10,6 +10,9 @@
  * CABINET.SHELF.001 (§39): по нему деталь узнаётся при пересчёте и сохраняет
  * свой Part ID, номер и кромку.
  */
+import {
+  constructionMounts,
+} from '@/core/parametric/types';
 import type {
   ParametricModel,
   ParametricPartRole,
@@ -102,11 +105,15 @@ export interface CabinetGeometry {
 export function computeGeometry(model: ParametricModel): CabinetGeometry {
   const t = model.thickness;
   const H = model.height;
-  const between = model.construction === 'BETWEEN_SIDES';
+  /* Верх и низ считаются НЕЗАВИСИМО: боковина укорачивается сверху только
+   * если её накрывает крыша, и снизу — только если дно подложено (этап 37).
+   * Для чистых схем результат тот же, что и раньше. */
+  const mounts = constructionMounts(model.construction);
 
-  const sideY = between
-    ? { min: 0, max: H }
-    : { min: t, max: H - t };
+  const sideY = {
+    min: mounts.bottomUnder ? t : 0,
+    max: mounts.topOnSides ? H - t : H,
+  };
 
   const backReserve =
     model.backPanel.type === 'INSET' || model.backPanel.type === 'GROOVE'
@@ -169,22 +176,25 @@ export const topBottomRule: ParametricRule = {
   name: 'Верх и низ',
   build(model) {
     const g = computeGeometry(model);
-    const between = model.construction === 'BETWEEN_SIDES';
-    // BETWEEN_SIDES: плита живёт между боковинами, её ширина меньше на 2t.
-    // ON_SIDES: плита накрывает боковины во всю ширину корпуса.
-    const x = between
-      ? { min: g.t, max: model.width - g.t }
-      : { min: 0, max: model.width };
+    const mounts = constructionMounts(model.construction);
+    /* Между боковинами плита уже на 2t; накрывая боковины — во всю ширину.
+     * Верх и низ считаются отдельно: схемы могут не совпадать (этап 37). */
+    const between = { min: g.t, max: model.width - g.t };
+    const full = { min: 0, max: model.width };
     const z = { min: 0, max: model.depth };
 
     const top = define(
       'CABINET.TOP', 'Крыша', 'TOP',
-      { x, y: { min: model.height - g.t, max: model.height }, z },
+      {
+        x: mounts.topOnSides ? full : between,
+        y: { min: model.height - g.t, max: model.height },
+        z,
+      },
       'y', model, model.materialId, { partType: 'top' },
     );
     const bottom = define(
       'CABINET.BOTTOM', 'Дно', 'BOTTOM',
-      { x, y: { min: 0, max: g.t }, z },
+      { x: mounts.bottomUnder ? full : between, y: { min: 0, max: g.t }, z },
       'y', model, model.materialId, { partType: 'bottom' },
     );
     return [top, bottom];

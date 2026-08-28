@@ -358,6 +358,22 @@ describe('Этап 36 · отмена, повтор и разрушающие д
     cabinetId = buildRealCabinet();
   });
 
+  it('§21 повторное применение той же модели не занимает шаг отмены', () => {
+    // Панель подтверждает поле при потере фокуса: тем же значением (этап 37).
+    const width = store().getCabinetModel(cabinetId)!.width;
+    store().applyCabinetPatch(cabinetId, { width: 2000 });
+    const historyAfterChange = store().past.length;
+
+    const model = store().getCabinetModel(cabinetId)!;
+    const repeat = store().applyParametricModel(cabinetId, model);
+    expect(repeat.ok).toBe(true);
+    expect(store().past.length).toBe(historyAfterChange);
+
+    // Одно нажатие «Отменить» возвращает прежнюю ширину.
+    store().undo();
+    expect(store().getCabinetModel(cabinetId)!.width).toBe(width);
+  });
+
   it('§21/§22 undo/redo: создание, изменение, материал, кромка, фурнитура, присадка', () => {
     // Изменение размера.
     const widthBefore = store().getCabinetModel(cabinetId)!.width;

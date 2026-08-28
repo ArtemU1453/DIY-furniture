@@ -18,7 +18,7 @@ import {
   drawerSlots,
   type CabinetPreset,
 } from '@/engines/cabinet';
-import { shelfOffsets } from '@/engines/parametric';
+import { shelfOffsets, CONSTRUCTION_LABELS, CONSTRUCTION_ORDER } from '@/engines/parametric';
 import type { CabinetType, ParametricModel } from '@/core/parametric/types';
 import type { FurnitureId } from '@/core/model/ids';
 import { hasOverride, partOverrides, partSource } from '@/engines/parametric';
@@ -200,8 +200,9 @@ export function CabinetDesigner({ onOpenPart, onOpen3D }: {
         <span className="dim">Схема</span>
         <select value={wizard.construction ?? 'BETWEEN_SIDES'}
           onChange={(e) => setWizard((w) => ({ ...w, construction: e.target.value as ParametricModel['construction'] }))}>
-          <option value="BETWEEN_SIDES">Верх и низ между боковинами</option>
-          <option value="ON_SIDES">Верх и низ на боковинах</option>
+          {CONSTRUCTION_ORDER.map((v) => (
+            <option key={v} value={v}>{CONSTRUCTION_LABELS[v]}</option>
+          ))}
         </select>
       </label>
 
@@ -348,8 +349,9 @@ export function CabinetDesigner({ onOpenPart, onOpen3D }: {
               <span className="dim">Схема корпуса</span>
               <select value={model.construction}
                 onChange={(e) => patch({ construction: e.target.value as ParametricModel['construction'] }, 'Схема корпуса')}>
-                <option value="BETWEEN_SIDES">Верх и низ между боковинами</option>
-                <option value="ON_SIDES">Верх и низ на боковинах</option>
+                {CONSTRUCTION_ORDER.map((v) => (
+                  <option key={v} value={v}>{CONSTRUCTION_LABELS[v]}</option>
+                ))}
               </select>
             </label>
             <label style={row}>
