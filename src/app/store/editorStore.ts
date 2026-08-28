@@ -102,6 +102,23 @@ import { newSheetMaterialId, newStoredRemnantId } from '@/core/model/ids';
 import { runCuttingInWorker, type CuttingHandle } from '@/workers/cuttingClient';
 import type { CuttingProgress } from '@/engines/cutting';
 import {
+  DEFAULT_EDITOR_2D,
+  buildEntities,
+  copyEntities,
+  deleteImpact,
+  markStatuses,
+  preparePaste,
+  prepareDuplicate,
+  collectIssues,
+  type Constraint2D,
+  type Dimension2D,
+  type EditorEntity,
+  type Editor2DState,
+  type Guide2D,
+  type ModelChange,
+  type ViewPlane,
+} from '@/engines/editor2d';
+import {
   applyPlans,
   applyPreset,
   canRemoveSheet,
@@ -282,6 +299,17 @@ export interface EditorState {
 
   // ── Состояние 3D-редактора (только интерфейс, не производственные данные) ──
   viewer: ViewerUiState;
+
+  /**
+   * Состояние 2D-редактора (§2). ТОЛЬКО интерфейс: инструмент, камера, сетка,
+   * привязки, направляющие, замеры, ограничения, выделение. Производственных
+   * данных здесь нет и в экспорт проекта оно не попадает (§131).
+   */
+  editor2d: Editor2DState;
+  /** Ограничения конструкции (§58) — вспомогательные, как направляющие. */
+  constraints: Constraint2D[];
+  /** Внутренний буфер обмена редактора (§80). */
+  clipboard: ReturnType<typeof copyEntities> | null;
 
   // ── Проект ────────────────────────────────────────────────────────────────
   newProject: (name?: string) => void;
@@ -546,6 +574,45 @@ export interface EditorState {
   setRemnantStatus: (id: string, status: RemnantStatus) => void;
   clearRemnants: () => void;
 
+  // ── 2D-редактор ───────────────────────────────────────────────────────────
+  /** Правка состояния интерфейса редактора. В историю НЕ попадает (§2/§121). */
+  setEditor2D: (patch: Partial<Editor2DState>) => void;
+  /** Сменить технический вид (§92–§97). */
+  setEditorPlane: (plane: ViewPlane) => void;
+  /** Заменить выделение (§17). */
+  setEditorSelection: (ids: string[]) => void;
+  /** Добавить/убрать объект из выделения (§18). */
+  toggleEditorSelection: (id: string) => void;
+  /**
+   * Применить изменения модели одной транзакцией (§122–§124): перетаскивание,
+   * изменение размера и групповая правка дают ОДНУ запись в истории.
+   */
+  applyEditorChanges: (changes: ModelChange[]) => { applied: number; skipped: number };
+  /** Скрыть/показать объект на холсте (§86). */
+  setEditorHidden: (id: string, hidden: boolean) => void;
+  /** Заблокировать/разблокировать объект (§85). */
+  setEditorLocked: (id: string, locked: boolean) => void;
+  /** Показать всё (§87). */
+  editorShowAll: () => void;
+  /** Изолировать выбранное (§88). */
+  editorIsolate: (ids: string[]) => void;
+  /** Направляющие (§49–§52). */
+  setEditorGuides: (guides: Guide2D[]) => void;
+  /** Замеры (§53–§55). */
+  setEditorDimensions: (dimensions: Dimension2D[]) => void;
+  /** Ограничения (§58–§64). */
+  setConstraints: (constraints: Constraint2D[]) => void;
+  /** Скопировать выбранное во внутренний буфер (§79/§80). */
+  editorCopy: (ids: string[]) => number;
+  /** Вставить из буфера (§79/§81). */
+  editorPaste: () => string[];
+  /** Дублировать выбранное (§78). */
+  editorDuplicate: (ids: string[]) => string[];
+  /** Удалить выбранное (§82/§83). */
+  editorDelete: (ids: string[]) => { removed: number; warnings: string[] };
+  /** Сущности холста для текущего вида (со статусами проверок). */
+  editorEntities: () => EditorEntity[];
+
   // ── Выбор ────────────────────────────────────────────────────────────────
   selectPart: (id: PartId | null) => void;
 
@@ -609,8 +676,286 @@ export const useEditorStore = create<EditorState>()(
       past: [],
       future: [],
       viewer: { ...DEFAULT_VIEWER },
+      editor2d: {
+        ...DEFAULT_EDITOR_2D,
+        snap: { ...DEFAULT_EDITOR_2D.snap },
+        filter: { ...DEFAULT_EDITOR_2D.filter },
+        guides: [],
+        dimensions: [],
+        selection: [],
+        isolated: [],
+        hidden: [],
+        locked: [],
+      },
+      constraints: [],
+      clipboard: null,
 
       setViewer: (patch) => set((s) => void Object.assign(s.viewer, patch)),
+
+      // ── 2D-редактор ─────────────────────────────────────────────────────
+      /* Всё, что ниже до applyEditorChanges, меняет ТОЛЬКО интерфейс, поэтому
+       * идёт через set, а не commit: положение камеры и выделение не должны
+       * попадать в Undo/Redo и в файл проекта (§2/§121/§131). */
+      setEditor2D: (patch) => set((s) => void Object.assign(s.editor2d, patch)),
+
+      setEditorPlane: (plane) =>
+        set((s) => {
+          s.editor2d.plane = plane;
+          // Выделение переживает смену вида: это те же объекты модели (§96).
+          s.editor2d.pending = null;
+        }),
+
+      setEditorSelection: (ids) => set((s) => void (s.editor2d.selection = [...ids])),
+
+      toggleEditorSelection: (id) =>
+        set((s) => {
+          const list = s.editor2d.selection;
+          const i = list.indexOf(id);
+          if (i >= 0) list.splice(i, 1);
+          else list.push(id);
+        }),
+
+      /**
+       * Единственная точка записи изменений холста в ProjectModel (§3).
+       * Все изменения набора применяются ОДНОЙ транзакцией (§122–§124).
+       */
+      applyEditorChanges: (changes) => {
+        if (changes.length === 0) return { applied: 0, skipped: 0 };
+        // §134: в режиме только для чтения модель не меняется вовсе.
+        if (get().editor2d.readOnly) return { applied: 0, skipped: changes.length };
+
+        let applied = 0;
+        let skipped = 0;
+        const parametric: Array<{ id: FurnitureId; key: string; value: number }> = [];
+
+        commit((p) => {
+          for (const change of changes) {
+            if (change.kind === 'move') {
+              if (change.entityType === 'MODULE') {
+                const furniture = p.furnitures.find((f) => String(f.id) === change.entityId);
+                if (!furniture) { skipped++; continue; }
+                furniture.position = {
+                  x: furniture.position.x + change.dx,
+                  y: furniture.position.y + change.dy,
+                  z: furniture.position.z + change.dz,
+                };
+                /* Изделие двигается вместе с содержимым: детали хранят мировые
+                 * координаты, поэтому сдвиг переносится и на них. */
+                for (const assembly of furniture.assemblies) {
+                  for (const part of assembly.parts) {
+                    part.position = {
+                      x: part.position.x + change.dx,
+                      y: part.position.y + change.dy,
+                      z: part.position.z + change.dz,
+                    };
+                  }
+                }
+                applied++;
+                continue;
+              }
+              const part = p.furnitures
+                .flatMap((f) => f.assemblies)
+                .flatMap((a) => a.parts)
+                .find((x) => String(x.id) === change.entityId);
+              if (!part) { skipped++; continue; }
+              part.position = {
+                x: part.position.x + change.dx,
+                y: part.position.y + change.dy,
+                z: part.position.z + change.dz,
+              };
+              applied++;
+              continue;
+            }
+
+            if (change.kind === 'rotate') {
+              if (change.entityType === 'MODULE') {
+                const furniture = p.furnitures.find((f) => String(f.id) === change.entityId);
+                if (!furniture) { skipped++; continue; }
+                furniture.rotation = { ...furniture.rotation, y: change.rotation };
+                applied++;
+                continue;
+              }
+              const part = p.furnitures
+                .flatMap((f) => f.assemblies)
+                .flatMap((a) => a.parts)
+                .find((x) => String(x.id) === change.entityId);
+              if (!part) { skipped++; continue; }
+              part.rotation = { ...part.rotation, y: change.rotation };
+              applied++;
+              continue;
+            }
+
+            if (change.kind === 'parameter') {
+              // Параметры применяются существующим движком после транзакции.
+              parametric.push({ id: change.entityId as FurnitureId, key: change.key, value: change.value });
+              continue;
+            }
+
+            if (change.kind === 'mirror') {
+              const furniture = p.furnitures.find((f) => String(f.id) === change.entityId);
+              if (!furniture) { skipped++; continue; }
+              const metadata = { ...(furniture.metadata ?? {}) };
+              metadata.mirrored = metadata.mirrored !== true;
+              furniture.metadata = metadata;
+              for (const assembly of furniture.assemblies) {
+                assembly.parts = assembly.parts.map(mirrorPart);
+              }
+              applied++;
+            }
+          }
+        });
+
+        /* Изменение параметра модуля идёт через существующий параметрический
+         * движок (§31/§32): он перегенерирует детали, соединения и присадку.
+         * Второй системы генерации не появляется. */
+        for (const item of parametric) {
+          const furniture = findFurniture(get().project, item.id);
+          if (!furniture || !hasParametricModel(furniture)) { skipped++; continue; }
+          const model = readParametricModel(furniture);
+          const res = get().applyParametricModel(item.id, { ...model, [item.key]: item.value });
+          if (res.ok) applied++; else skipped++;
+        }
+
+        return { applied, skipped };
+      },
+
+      setEditorHidden: (id, hidden) =>
+        set((s) => {
+          const list = s.editor2d.hidden.filter((x) => x !== id);
+          s.editor2d.hidden = hidden ? [...list, id] : list;
+        }),
+
+      setEditorLocked: (id, locked) =>
+        set((s) => {
+          const list = s.editor2d.locked.filter((x) => x !== id);
+          s.editor2d.locked = locked ? [...list, id] : list;
+        }),
+
+      editorShowAll: () =>
+        set((s) => {
+          s.editor2d.hidden = [];
+          s.editor2d.isolated = [];
+        }),
+
+      editorIsolate: (ids) => set((s) => void (s.editor2d.isolated = [...ids])),
+
+      setEditorGuides: (guides) => set((s) => void (s.editor2d.guides = [...guides])),
+      setEditorDimensions: (dimensions) => set((s) => void (s.editor2d.dimensions = [...dimensions])),
+      setConstraints: (constraints) => set((s) => void (s.constraints = [...constraints])),
+
+      editorCopy: (ids) => {
+        const clipboard = copyEntities(get().project, ids);
+        set((s) => void (s.clipboard = clipboard));
+        return clipboard.items.length;
+      },
+
+      editorPaste: () => {
+        if (get().editor2d.readOnly) return [];
+        const prepared = preparePaste(get().clipboard);
+        if (prepared.furnitures.length === 0 && prepared.parts.length === 0) return [];
+        const ids: string[] = [];
+        commit((p) => {
+          for (const furniture of prepared.furnitures) {
+            p.furnitures.push(furniture);
+            ids.push(String(furniture.id));
+          }
+          if (prepared.parts.length > 0) {
+            const assembly = firstAssembly(p);
+            if (assembly) {
+              for (const part of prepared.parts) {
+                assembly.parts.push(part);
+                ids.push(String(part.id));
+              }
+            }
+          }
+        });
+        set((s) => void (s.editor2d.selection = ids));
+        return ids;
+      },
+
+      editorDuplicate: (ids) => {
+        if (get().editor2d.readOnly) return [];
+        const prepared = prepareDuplicate(get().project, ids);
+        if (prepared.furnitures.length === 0 && prepared.parts.length === 0) return [];
+        const created: string[] = [];
+        commit((p) => {
+          for (const furniture of prepared.furnitures) {
+            p.furnitures.push(furniture);
+            created.push(String(furniture.id));
+          }
+          if (prepared.parts.length > 0) {
+            const assembly = firstAssembly(p);
+            if (assembly) {
+              for (const part of prepared.parts) {
+                assembly.parts.push(part);
+                created.push(String(part.id));
+              }
+            }
+          }
+        });
+        set((s) => void (s.editor2d.selection = created));
+        return created;
+      },
+
+      editorDelete: (ids) => {
+        if (get().editor2d.readOnly) return { removed: 0, warnings: [] };
+        /* §83: зависимости не удаляются молча — о них сообщается, а сами
+         * соединения снимаются по существующим правилам модели. */
+        const impacts = deleteImpact(get().project, ids);
+        const warnings = impacts
+          .filter((i) => !i.safe)
+          .map((i) => `Удаление затронет соединений: ${i.connections.length}.`);
+
+        const target = new Set(ids);
+        let removed = 0;
+        commit((p) => {
+          const before = p.furnitures.length;
+          p.furnitures = p.furnitures.filter((f) => !target.has(String(f.id)));
+          removed += before - p.furnitures.length;
+          for (const furniture of p.furnitures) {
+            for (const assembly of furniture.assemblies) {
+              const n = assembly.parts.length;
+              assembly.parts = assembly.parts.filter((x) => !target.has(String(x.id)));
+              removed += n - assembly.parts.length;
+            }
+          }
+          // Соединения на исчезнувшие детали больше не имеют смысла.
+          const alive = new Set(
+            p.furnitures.flatMap((f) => f.assemblies).flatMap((a) => a.parts).map((x) => String(x.id)),
+          );
+          p.hardwareConnections = p.hardwareConnections.filter(
+            (c) => alive.has(String(c.partAId)) && alive.has(String(c.partBId)),
+          );
+        });
+        set((s) => {
+          s.editor2d.selection = s.editor2d.selection.filter((id) => !target.has(id));
+        });
+        return { removed, warnings };
+      },
+
+      editorEntities: () => {
+        const state = get();
+        const ui = state.editor2d;
+        const entities = buildEntities(state.project, {
+          plane: ui.plane,
+          filter: ui.filter,
+          showHardware: ui.showHardware,
+          showConnections: ui.showConnections,
+        });
+        const hidden = new Set(ui.hidden);
+        const locked = new Set(ui.locked);
+        const isolated = new Set(ui.isolated);
+        const withFlags = entities
+          // §88: при изоляции остальные объекты не показываются вовсе.
+          .filter((e) => isolated.size === 0 || isolated.has(e.entityId) || isolated.has(e.parentId ?? ''))
+          .map((e) => ({
+            ...e,
+            hidden: e.hidden || hidden.has(e.entityId),
+            locked: e.locked || locked.has(e.entityId),
+          }));
+        return markStatuses(withFlags, collectIssues(state.project));
+      },
+
       showAllParts: () =>
         commit((p) => {
           for (const f of p.furnitures) for (const a of f.assemblies) for (const part of a.parts) {
