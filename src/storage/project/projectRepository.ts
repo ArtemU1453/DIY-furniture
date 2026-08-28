@@ -40,3 +40,22 @@ export async function listProjects(): Promise<ProjectSummary[]> {
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
+
+/**
+ * Последний сохранённый проект — для восстановления после перезагрузки
+ * страницы или аварийного закрытия (аудит этапа 34).
+ *
+ * Хранилище может быть недоступно (приватный режим, отключённые данные сайта):
+ * в этом случае возвращается undefined, и приложение просто стартует с нового
+ * проекта, а не падает.
+ */
+export async function loadLastProject(): Promise<Project | undefined> {
+  try {
+    const list = await listProjects();
+    const latest = list[0];
+    if (!latest) return undefined;
+    return await loadProject(latest.id);
+  } catch {
+    return undefined;
+  }
+}

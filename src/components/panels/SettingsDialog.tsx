@@ -1,7 +1,6 @@
 import { Modal } from '../ui/Modal';
 import { useEditorStore } from '@/app/store/editorStore';
 import { NumberField } from '../ui/NumberField';
-import type { ProjectSettings } from '@/core/model/types';
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const settings = useEditorStore((s) => s.project.settings);
@@ -9,19 +8,15 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="Настройки проекта" onClose={onClose}>
+      {/* Все производственные размеры — в миллиметрах: раскрой, присадка,
+        * спецификация и документы считают только в мм. Выбор других единиц
+        * ничего не менял, поэтому вместо неработающего переключателя здесь
+        * честная подпись. */}
       <div className="field">
-        <label>Единицы отображения</label>
-        <select
-          value={settings.displayUnits}
-          onChange={(e) =>
-            updateSettings({ displayUnits: e.target.value as ProjectSettings['displayUnits'] })
-          }
-        >
-          <option value="mm">мм</option>
-          <option value="cm">см</option>
-          <option value="m">м</option>
-          <option value="in">дюймы</option>
-        </select>
+        <label>Единицы измерения</label>
+        <div className="dim" style={{ fontSize: 12 }} data-testid="settings-units">
+          миллиметры — единые для модели, раскроя, присадки и документов
+        </div>
       </div>
       <NumberField
         label="Ширина пропила"

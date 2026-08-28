@@ -637,10 +637,13 @@ describe('Соединения 19 — регенерация и ручные с�
     store().addConnection({ hardwareId: hwByCategory('dowel').id, partAId: a.id, partBId: extra, quantity: 2 });
     const before = conns().length;
 
+    /* Удаление детали само снимает её соединения (аудит этапа 34), поэтому
+     * ручная чистка после него уже ничего не находит — важен итог, а не то,
+     * кто именно убрал связь. */
     store().removePart(extra);
-    const removed = store().pruneConnections();
-    expect(removed).toBeGreaterThan(0);
     expect(conns().length).toBeLessThan(before);
+    expect(conns().some((c) => String(c.partBId) === String(extra))).toBe(false);
+    expect(store().pruneConnections()).toBe(0);
     const live = new Set(parts().map((p) => String(p.id)));
     for (const c of conns()) expect(live.has(String(c.partAId))).toBe(true);
 

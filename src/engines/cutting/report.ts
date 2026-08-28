@@ -8,6 +8,8 @@
 import type { CuttingResult, LeftoverSheet, Material, Project } from '@/core/model/types';
 import { leftoversOfResult, leftoverSummary, type LeftoverLimits } from './leftovers';
 import { cuttingCost, type CuttingCost } from './queue';
+// Перевод мм² в м² — общий для всего раскроя, чтобы округление совпадало.
+import { m2 } from './metrics';
 
 export interface CuttingReportHeader {
   project: string;
@@ -50,7 +52,6 @@ export interface CuttingReportSection {
   cost: CuttingCost | null;
 }
 
-const m2 = (mm2: number): number => Math.round((mm2 / 1_000_000) * 100) / 100;
 const size = (w: number, h: number): string => `${Math.round(w)} × ${Math.round(h)}`;
 
 /** Раздел отчёта по одному заданию (§108–§111). */

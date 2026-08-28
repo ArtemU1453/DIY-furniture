@@ -2,10 +2,13 @@ import { useEditorStore } from '@/app/store/editorStore';
 import { allParts, totalPartCount } from '@/core/model/selectors';
 import { validateProjectModel } from '@/engines/status';
 
-const SAVE_LABEL: Record<'saved' | 'unsaved' | 'saving', { text: string; color: string }> = {
+const SAVE_LABEL: Record<'saved' | 'unsaved' | 'saving' | 'error', { text: string; color: string }> = {
   saved: { text: '● Сохранено', color: 'var(--ok)' },
   unsaved: { text: '● Есть несохранённые изменения', color: '#e6c060' },
   saving: { text: '● Сохранение…', color: 'var(--accent)' },
+  // Молчать о неудачном сохранении нельзя: пользователь должен успеть
+  // выгрузить проект в файл, пока правки не потеряны.
+  error: { text: '● Не удалось сохранить', color: 'var(--danger)' },
 };
 
 export function StatusBar({ status }: { status: string }) {
