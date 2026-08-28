@@ -118,6 +118,19 @@ import {
 } from '@/engines/cutting';
 import { importHardwareLibrary, planPresetApplication } from '@/engines/hardware';
 import {
+  bumpRevision,
+  createRelease,
+  detectChanges,
+  exportProductionJob,
+  importProductionJob,
+  jobOf,
+  jobStatusFor,
+  productionBatches,
+  productionParts,
+  productionReadiness,
+  productionSnapshot,
+} from '@/engines/production';
+import {
   applyEdgeConfiguration,
   applyPresetTo,
   quickActionConfig,
@@ -142,6 +155,7 @@ import {
 import type {
   CuttingReport,
   CuttingSettings,
+  ProductionStatus,
   QualityThresholds,
   EdgeMaterial,
   Furniture,
@@ -872,6 +886,20 @@ export interface EditorState {
   exportCuttingJobsJson: () => string;
   /** Импорт заданий раскроя из JSON (§117). */
   importCuttingJobsJson: (json: string) => { ok: boolean; jobs: number; errors: string[] };
+
+  // ── Производство (этап 31) ────────────────────────────────────────────────
+  /** Пересчитать снимок производства и статус задания (§76/§81). */
+  refreshProduction: () => { revision: number; status: ProductionStatus; changes: number };
+  /** Выпустить задание REL-00X (§78/§79). */
+  createProductionRelease: (note?: string) => { ok: boolean; releaseId?: string; error?: string };
+  /** Отметить задание завершённым (§2). */
+  completeProduction: () => void;
+  /** Примечание к заданию. */
+  setProductionNote: (note: string) => void;
+  /** Экспорт production-job.json (§136). */
+  exportProductionJobJson: () => string;
+  /** Импорт production-job.json (§140). */
+  importProductionJobJson: (json: string) => { ok: boolean; releases: number; error?: string };
 
   // ── 2D-редактор ───────────────────────────────────────────────────────────
   /** Правка состояния интерфейса редактора. В историю НЕ попадает (§2/§121). */
@@ -3392,6 +3420,93 @@ export const useEditorStore = create<EditorState>()(
           });
         }
         return { ok: true, jobs: result.jobs.length, errors: result.errors };
+      },
+
+      // ── Производство (этап 31) ──────────────────────────────────────────
+      refreshProduction: () => {
+        const project = get().project;
+        const job = jobOf(project);
+        const previous = job.snapshot;
+        const parts = productionParts(project, previous?.parts);
+        const snapshot = productionSnapshot(project, parts);
+        const readiness = productionReadiness(project, parts, { cuttingRunning: get().cuttingRunning });
+        const changes = detectChanges(previous, snapshot, parts);
+        /* Ревизия растёт только при фактическом изменении снимка (§81):
+         * повторный пересчёт без правок не портит выпущенное задание. */
+        const bumped = bumpRevision(job, snapshot, snapshot.createdAt);
+        const next = {
+          ...bumped,
+          snapshot,
+          status: jobStatusFor(bumped, readiness),
+          updatedAt: snapshot.createdAt,
+        };
+        commit((p) => {
+          p.production = { ...(p.production ?? {}), job: next, history: next.releases ?? [] };
+        });
+        return { revision: next.revision, status: next.status, changes: changes.length };
+      },
+
+      createProductionRelease: (note) => {
+        const project = get().project;
+        const job = jobOf(project);
+        const parts = productionParts(project, job.snapshot?.parts);
+        const readiness = productionReadiness(project, parts, { cuttingRunning: get().cuttingRunning });
+        if (!readiness.ready) {
+          return { ok: false, error: 'Выпуск невозможен: в чек-листе есть ошибки.' };
+        }
+        const snapshot = productionSnapshot(project, parts);
+        const { job: nextJob, release } = createRelease(job, snapshot, {
+          partCount: parts.length,
+          note,
+        });
+        commit((p) => {
+          p.production = { job: nextJob, history: nextJob.releases ?? [] };
+        });
+        return { ok: true, releaseId: release.id };
+      },
+
+      completeProduction: () => {
+        const job = jobOf(get().project);
+        commit((p) => {
+          p.production = {
+            ...(p.production ?? {}),
+            job: { ...job, status: 'COMPLETED', updatedAt: new Date().toISOString() },
+          };
+        });
+      },
+
+      setProductionNote: (note) => {
+        const job = jobOf(get().project);
+        commit((p) => {
+          p.production = { ...(p.production ?? {}), job: { ...job, note } };
+        });
+      },
+
+      exportProductionJobJson: () => {
+        const project = get().project;
+        const job = jobOf(project);
+        const parts = productionParts(project, job.snapshot?.parts);
+        return exportProductionJob(project, {
+          job,
+          parts,
+          batches: productionBatches(parts),
+          readiness: productionReadiness(project, parts, { cuttingRunning: get().cuttingRunning }),
+        });
+      },
+
+      importProductionJobJson: (json) => {
+        const result = importProductionJob(json);
+        if (!result.ok || !result.file) return { ok: false, releases: 0, error: result.error };
+        /* Импорт восстанавливает ЗАДАНИЕ и его выпуски, а не детали: детали
+         * остаются производными от ProjectModel (§4/§140). */
+        const file = result.file;
+        commit((p) => {
+          p.production = {
+            job: { ...file.job, projectId: String(p.id) },
+            history: file.releases,
+          };
+        });
+        return { ok: true, releases: file.releases.length };
       },
 
       selectPart: (id) =>

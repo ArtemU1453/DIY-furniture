@@ -87,6 +87,19 @@ export function deserializeProject(json: string): Project {
   // Настройки чертежа и история генерации (этап 11).
   if (!project.documents.settings) project.documents.settings = { scaleOverrides: {}, hidden: {} };
   if (!Array.isArray(project.documents.history)) project.documents.history = [];
+  // Производственное задание (этап 31): старые проекты открываются без него.
+  if (project.production !== undefined) {
+    if (typeof project.production !== 'object' || project.production === null) {
+      delete project.production;
+    } else {
+      if (project.production.job && !Array.isArray(project.production.job.releases)) {
+        project.production.job.releases = [];
+      }
+      if (!Array.isArray(project.production.history)) {
+        project.production.history = project.production.job?.releases ?? [];
+      }
+    }
+  }
   const major = project.version.split('.')[0];
   const currentMajor = PROJECT_FORMAT_VERSION.split('.')[0];
   if (major !== currentMajor) {

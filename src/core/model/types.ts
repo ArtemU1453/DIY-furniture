@@ -1407,6 +1407,83 @@ export interface StoredRemnant {
   reservedBy?: string;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Производство (этап 31)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Состояние производственного задания (§2). */
+export type ProductionStatus = 'DRAFT' | 'READY' | 'IN_PROGRESS' | 'COMPLETED' | 'ERROR';
+
+/** Состояние детали в производстве (§9). */
+export type ProductionPartStatus = 'NEW' | 'MODIFIED' | 'READY' | 'ERROR';
+
+/**
+ * Снимок ревизий проекта (§76/§77).
+ *
+ * Снимок не копирует детали: он хранит СИГНАТУРЫ разделов, по которым видно,
+ * что изменилось между выпусками. Сами данные остаются в ProjectModel.
+ */
+export interface ProductionSnapshot {
+  projectRevision: string;
+  partsRevision: string;
+  cuttingRevision: string;
+  machiningRevision: string;
+  hardwareRevision: string;
+  createdAt: string; // ISO
+  /** Сигнатуры деталей: partId → ревизия детали (§77/§82). */
+  parts: Record<string, string>;
+}
+
+/** Выпуск производства (§78/§79). */
+export interface ProductionRelease {
+  /** Человекочитаемый номер: REL-001 (§79). */
+  id: string;
+  number: number;
+  createdAt: string; // ISO
+  /** Снимок на момент выпуска — он не меняется вслед за проектом (§80). */
+  snapshot: ProductionSnapshot;
+  note?: string;
+  /** Сколько деталей вошло в выпуск. */
+  partCount: number;
+}
+
+/** Партия деталей (§59/§60). */
+export interface ProductionBatch {
+  id: string;
+  materialId: MaterialId;
+  materialName: string;
+  thickness: Mm;
+  /** Вид обработки партии: раскрой, кромка, присадка. */
+  kind: 'CUT' | 'EDGE' | 'MACHINING';
+  partIds: PartId[];
+  /** Общее количество деталей с учётом quantity (§61). */
+  quantity: number;
+  status: 'READY' | 'WARNING' | 'ERROR';
+}
+
+/** Производственное задание (§1–§3). */
+export interface ProductionJob {
+  id: string;
+  projectId: string;
+  status: ProductionStatus;
+  /** Текущая ревизия задания; растёт после изменений проекта (§81). */
+  revision: number;
+  createdAt: string; // ISO
+  updatedAt: string; // ISO
+  /** Снимок последнего расчёта готовности (§76). */
+  snapshot?: ProductionSnapshot;
+  /** Выпуски задания, новейший последним (§84). */
+  releases?: ProductionRelease[];
+  note?: string;
+}
+
+/** Производственное состояние проекта (§119). */
+export interface ProductionState {
+  job?: ProductionJob;
+  /** История выпусков — локальная, без облака (§84). */
+  history?: ProductionRelease[];
+}
+
 /**
  * Этикетка детали (§108/§109). Модель данных без привязки к печатному
  * движку: тот же объект используется и для списка, и для будущей печати.
@@ -1566,6 +1643,8 @@ export interface Project {
   /** Библиотека сохранённых остатков (RemnantLibrary). */
   remnants: StoredRemnant[];
   documents: DocumentsState;
+  /** Производственное задание проекта (§119). Необязательно — старые проекты открываются. */
+  production?: ProductionState;
   furnitures: Furniture[];
   metadata?: Record<string, unknown>;
 }
