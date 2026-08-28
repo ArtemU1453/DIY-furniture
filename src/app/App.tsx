@@ -22,6 +22,7 @@ import { ConnectionsView } from '@/components/panels/ConnectionsView';
 import { CabinetDesigner } from '@/components/panels/CabinetDesigner';
 import { InteractiveEditor } from '@/components/panels/InteractiveEditor';
 import { CuttingPrep } from '@/components/panels/CuttingPrep';
+import { ProductionCenter } from '@/components/panels/ProductionCenter';
 import { ParametricPanel } from '@/components/panels/ParametricPanel';
 import { Scene3D, type CameraApi } from '@/features/designer/Scene3D';
 import { ModelTree } from '@/components/panels/ModelTree';
@@ -33,7 +34,7 @@ import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { saveCurrentProject } from '@/features/project/projectActions';
 
-type CenterView = '3d' | 'editor2d' | 'interactive' | 'cabinet' | 'cuttingPrep' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'modules';
+type CenterView = '3d' | 'editor2d' | 'interactive' | 'cabinet' | 'cuttingPrep' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'productionCenter' | 'modules';
 type ViewMode = '3d' | '2d' | 'split';
 
 export function App() {
@@ -137,6 +138,7 @@ export function App() {
               ['modules', 'Модули'],
               ['parametric', 'Параметры'],
               ['production', 'Производство'],
+              ['productionCenter', 'Цех'],
               ['documents', 'Документы'],
               ['library', 'Библиотека'],
             ] as Array<[CenterView, string]>
@@ -267,6 +269,13 @@ export function App() {
             <ProductionView
               onOpenPart={(id) => { selectPart(id); setCenterView('table'); }}
               onOpenCutting={() => setCenterView('cutting')}
+            />
+          )}
+          {centerView === 'productionCenter' && (
+            <ProductionCenter
+              onOpenPart={(id) => { selectPart(id as never); setCenterView('table'); }}
+              onOpenCutting={() => setCenterView('cutting')}
+              onOpenDocuments={() => setCenterView('documents')}
             />
           )}
           {centerView === 'documents' && (
