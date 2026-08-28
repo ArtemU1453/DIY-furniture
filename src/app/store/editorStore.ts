@@ -560,7 +560,7 @@ export interface EditorState {
   cuttingRunning: boolean;
   cuttingProgress: CuttingProgress | null;
   cuttingError: string | null;
-  saveState: 'saved' | 'unsaved' | 'saving';
+  saveState: 'saved' | 'unsaved' | 'saving' | 'error';
   focusNonce: number;
   past: Project[];
   future: Project[];
@@ -772,7 +772,7 @@ export interface EditorState {
   isolatePart: (id: PartId | null) => void;
 
   // ── Сохранение / фокус ──────────────────────────────────────────────────────
-  setSaveState: (state: 'saved' | 'unsaved' | 'saving') => void;
+  setSaveState: (state: 'saved' | 'unsaved' | 'saving' | 'error') => void;
   requestFocus: () => void;
 
   // ── Документы ────────────────────────────────────────────────────────────────
@@ -1547,9 +1547,18 @@ export const useEditorStore = create<EditorState>()(
        * узлы, ссылающиеся на исчезнувшие детали, и «мёртвая» присадка. */
       removeFurniture: (id) => {
         const next = removeCabinetPure(get().project, id);
+        // Детали изделия исчезают — снимаем и поставленную на них фурнитуру.
+        const removedParts = new Set(
+          (get().project.furnitures.find((f) => f.id === id)?.assemblies ?? [])
+            .flatMap((a) => a.parts.map((part) => String(part.id))),
+        );
         commit((p) => {
           p.furnitures = next.furnitures;
           p.hardwareConnections = next.connections;
+          const items = p.hardwareInstances;
+          if (items) {
+            p.hardwareInstances = items.filter((i) => !removedParts.has(String(i.partId)));
+          }
         });
         if (get().activeFurnitureId === id) set((s) => void (s.activeFurnitureId = null));
       },
@@ -2599,6 +2608,15 @@ export const useEditorStore = create<EditorState>()(
         commit((p) => {
           const assembly = findAssemblyOfPart(p, id);
           if (assembly) assembly.parts = assembly.parts.filter((x) => x.id !== id);
+          /* Вместе с деталью уходит всё, что на ней держалось: узлы, где она
+           * была стороной, и поставленная на неё фурнитура. Иначе в проекте
+           * остаются связи и единицы, ссылающиеся в пустоту, а присадка от них
+           * продолжает считаться. */
+          p.hardwareConnections = pruneDeadConnections(p).connections;
+          const items = p.hardwareInstances;
+          if (items) {
+            p.hardwareInstances = items.filter((i) => String(i.partId) !== String(id));
+          }
         });
         if (get().selectedPartId === id) set((s) => void (s.selectedPartId = null));
       },

@@ -34,6 +34,7 @@ import { overallDimensions } from '@/engines/viewer';
 import { allParts } from '@/core/model/selectors';
 import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
+import { loadLastProject } from '@/storage/project/projectRepository';
 import { saveCurrentProject } from '@/features/project/projectActions';
 
 type CenterView = '3d' | 'editor2d' | 'interactive' | 'cabinet' | 'cuttingPrep' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'productionCenter' | 'modules' | 'hardwareCatalog' | 'viewer3d';
@@ -61,18 +62,38 @@ export function App() {
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
 
-  // Автобэкап + индикатор статуса сохранения.
-  const autosaver = useRef(createAutosaver({ onStatus: (st) => useEditorStore.getState().setSaveState(st) }));
+  /* Восстановление после перезагрузки и аварийного закрытия: автосохранение
+   * пишет проект в IndexedDB, поэтому при старте мы возвращаем последний
+   * сохранённый, а не начинаем с пустого. Подписка на автосохранение
+   * включается только после этого, чтобы не перезаписать восстановленное. */
+  const [restored, setRestored] = useState(false);
   useEffect(() => {
+    let cancelled = false;
+    void loadLastProject().then((saved) => {
+      if (cancelled) return;
+      if (saved) useEditorStore.getState().loadProject(saved);
+      setRestored(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Автобэкап + индикатор статуса сохранения.
+  const autosaver = useRef(createAutosaver({
+    onStatus: (st) => useEditorStore.getState().setSaveState(st),
+    onError: (message) => setStatus(message),
+  }));
+  useEffect(() => {
+    if (!restored) return;
+    const saver = autosaver.current;
     const unsub = useEditorStore.subscribe((state, prev) => {
       // Автосохраняем только при реальном изменении проекта.
-      if (state.project !== prev.project) autosaver.current.schedule(state.project);
+      if (state.project !== prev.project) saver.schedule(state.project);
     });
     return () => {
       unsub();
-      void autosaver.current.flush();
+      void saver.flush();
     };
-  }, []);
+  }, [restored]);
 
   // Горячие клавиши.
   useEffect(() => {

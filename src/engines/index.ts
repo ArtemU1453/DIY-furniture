@@ -10,7 +10,6 @@ import { SkylineEngine } from './cutting/SkylineEngine';
 import { registerFurnitureEngine, CustomFurnitureEngine } from './furniture/FurnitureEngine';
 import { CabinetEngine } from './furniture/cabinet/CabinetEngine';
 import { registerMachiningEngine, NoopMachiningEngine } from './machining/MachiningEngine';
-import { registerDrawingEngine, BoundsDrawingEngine } from './drawings/DrawingEngine';
 
 let bootstrapped = false;
 
@@ -25,7 +24,6 @@ export function bootstrapEngines(): void {
   registerFurnitureEngine(new CustomFurnitureEngine());
   registerFurnitureEngine(new CabinetEngine());
   registerMachiningEngine(new NoopMachiningEngine());
-  registerDrawingEngine(new BoundsDrawingEngine());
 }
 
 export { getCuttingEngine, listCuttingEngines } from './cutting/CuttingEngine';

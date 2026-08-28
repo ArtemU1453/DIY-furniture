@@ -13,7 +13,9 @@ export interface Autosaver {
 
 export interface AutosaverOptions {
   delayMs?: number;
-  onStatus?: (status: 'saving' | 'saved') => void;
+  onStatus?: (status: 'saving' | 'saved' | 'error') => void;
+  /** Сообщение о неудачном сохранении — чтобы показать его пользователю. */
+  onError?: (message: string) => void;
 }
 
 export function createAutosaver(options: AutosaverOptions = {}): Autosaver {
@@ -25,10 +27,22 @@ export function createAutosaver(options: AutosaverOptions = {}): Autosaver {
     timer = null;
     if (!pending) return;
     const project = pending;
-    pending = null;
     options.onStatus?.('saving');
-    await saveProject(project);
-    options.onStatus?.('saved');
+    try {
+      await saveProject(project);
+      /* Снимаем очередь только после УСПЕШНОЙ записи: если хранилище
+       * недоступно (приватный режим, переполнение), проект остаётся в
+       * очереди и будет сохранён при следующей попытке. */
+      if (pending === project) pending = null;
+      options.onStatus?.('saved');
+    } catch (error) {
+      options.onStatus?.('error');
+      options.onError?.(
+        error instanceof Error && error.message
+          ? `Не удалось сохранить проект: ${error.message}`
+          : 'Не удалось сохранить проект: локальное хранилище недоступно.',
+      );
+    }
   };
 
   return {
@@ -42,6 +56,7 @@ export function createAutosaver(options: AutosaverOptions = {}): Autosaver {
         clearTimeout(timer);
         timer = null;
       }
+      // run() сам обрабатывает ошибку — flush никогда не роняет вызывающий код.
       await run();
     },
     cancel() {
