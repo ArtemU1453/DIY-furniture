@@ -223,6 +223,14 @@ export function createDefaultHardware(): Hardware[] {
       category: 'handle',
       parameters: { centerDistance: 96, diameter: 5, edgeOffset: 40 },
     },
+    // Направляющая нужна по той же причине: без крепежа категории slide
+    // правило ящиков не создаст узлов (этап 28, §47).
+    {
+      id: newHardwareId(),
+      name: 'Направляющая роликовая 450',
+      category: 'slide',
+      parameters: { length: 450, screwDiameter: 4, edgeOffset: 37 },
+    },
   ];
 }
 

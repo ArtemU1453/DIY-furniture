@@ -60,6 +60,13 @@ function byRole(parts: Part[], role: PartRole): Part[] {
   return parts.filter((p) => roleOf(p) === role && p.metadata?.hidden !== true);
 }
 
+/** Фронт ящика — тоже фасад по роли, но петли на него не ставятся (§37/§47). */
+function isDrawerPart(part: Part): boolean {
+  const type = typeOf(part);
+  return type === 'drawer_front' || type === 'drawer_side'
+    || type === 'drawer_back' || type === 'drawer_bottom';
+}
+
 function sides(parts: Part[]): { left?: Part; right?: Part; all: Part[] } {
   const all = byRole(parts, 'side');
   return {
@@ -260,7 +267,8 @@ export const doorRule: ConnectionRule = {
   name: 'Фасады на петлях',
   build(ctx) {
     const { left, right, all } = sides(ctx.parts);
-    const doors = byRole(ctx.parts, 'facade');
+    // Фронты ящиков навешиваются на направляющие, а не на петли (§47).
+    const doors = byRole(ctx.parts, 'facade').filter((p) => !isDrawerPart(p));
     if (doors.length === 0 || all.length === 0) return [];
 
     const out: ConnectionPlanItem[] = [];
@@ -280,15 +288,55 @@ export const doorRule: ConnectionRule = {
 };
 
 /**
- * Ящики (§39) — архитектурная заготовка. Правило зарегистрировано и вызывается,
- * но пока не порождает соединений: полноценные ящики появятся позже, и добавить
- * их можно будет здесь, не трогая движок.
+ * Ящики (§39 этапа 19, §47/§48 этапа 28).
+ *
+ * Короб ящика ездит по направляющим, закреплённым на боковинах корпуса, а сам
+ * собирается корпусным крепежом: фронт и задняя стенка к боковинам короба.
+ * Ручка ставится на фронт, если ручки включены.
  */
 export const drawerConnectionRule: ConnectionRule = {
   id: 'DRAWER',
   name: 'Ящики',
-  build() {
-    return [];
+  build(ctx) {
+    const drawerParts = ctx.parts.filter((p) => isDrawerPart(p) && p.metadata?.hidden !== true);
+    if (drawerParts.length === 0) return [];
+    const { left, right, all } = sides(ctx.parts);
+    const carcassLeft = left ?? all[0];
+    const carcassRight = right ?? all[all.length - 1];
+
+    // Детали группируются по номеру ящика: один ящик — один набор узлов.
+    const byDrawer = new Map<number, Part[]>();
+    for (const part of drawerParts) {
+      const index = Number(part.metadata?.drawer ?? 0);
+      const list = byDrawer.get(index) ?? [];
+      list.push(part);
+      byDrawer.set(index, list);
+    }
+
+    const out: ConnectionPlanItem[] = [];
+    for (const [index, parts] of [...byDrawer.entries()].sort((a, b) => a[0] - b[0])) {
+      const front = parts.find((p) => typeOf(p) === 'drawer_front');
+      const back = parts.find((p) => typeOf(p) === 'drawer_back');
+      const boxSides = parts.filter((p) => typeOf(p) === 'drawer_side');
+      const boxLeft = boxSides.find((p) => p.metadata?.side === 'left');
+      const boxRight = boxSides.find((p) => p.metadata?.side === 'right');
+
+      // Направляющие: боковина короба ↔ боковина корпуса (§47).
+      if (boxLeft && carcassLeft) out.push(plan(this.id, 'slide', boxLeft, carcassLeft, 1, `slide-left-${index}`));
+      if (boxRight && carcassRight) out.push(plan(this.id, 'slide', boxRight, carcassRight, 1, `slide-right-${index}`));
+
+      // Сборка короба корпусным крепежом.
+      for (const side of boxSides) {
+        if (front) out.push(plan(this.id, ctx.jointCategory, front, side, 2, `front-${index}`));
+        if (back) out.push(plan(this.id, ctx.jointCategory, back, side, 2, `back-${index}`));
+      }
+
+      // Ручка на фронте ящика (§39/§40 этапа 28).
+      if (ctx.handles && front && carcassLeft) {
+        out.push(plan(this.id, 'handle', front, carcassLeft, 1, `handle-${index}`));
+      }
+    }
+    return out;
   },
 };
 
