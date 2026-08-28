@@ -327,8 +327,21 @@ describe('Присадка 15 — валидация', () => {
   it('Тест 21/72: глубина 30 мм в детали 16 мм → ошибка', () => {
     const side = partByType('side_left');
     expect(allowedDepth(side, { face: 'front' })).toBe(side.thickness);
+    // Через модель глубина 30 мм в детали 16 мм не проходит (этап 38),
+    // но в данных из файла валидатор обязан её найти.
     store().addManualOperation({ partId: side.id, face: 'front', x: 200, y: 300, diameter: 8, depth: 30 });
-    const issues = validateMachining(allOperations(project()), project());
+    expect(allParts(project()).flatMap((p) => p.machining)
+      .some((o) => (o.depth ?? 0) > side.thickness)).toBe(false);
+
+    const broken = structuredClone(project());
+    const part = broken.furnitures.flatMap((f) => f.assemblies).flatMap((a) => a.parts)
+      .find((p) => String(p.id) === String(side.id))!;
+    part.machining.push({
+      id: 'broken-depth' as never, type: 'drilling', partId: side.id,
+      face: 'front', x: 200, y: 300, z: 0, diameter: 8, depth: 30,
+      through: false, origin: 'manual',
+    });
+    const issues = validateMachining(allOperations(broken), broken);
     expect(issues.some((i) => i.code === 'machining.depthExceeds' && i.severity === 'error')).toBe(true);
   });
 

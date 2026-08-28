@@ -106,8 +106,21 @@ describe('MachiningEngine — валидация', () => {
 
   it('Тест 5: глубина глухого отверстия больше толщины → ошибка', () => {
     const side = partByType('side_left');
+    // Модель такую операцию больше не принимает (этап 38)…
     store().addManualOperation({ partId: side.id, face: 'front', x: 100, y: 100, diameter: 8, depth: 20 });
-    const issues = validateMachining(allOperations(project()), project());
+    expect(allParts(project()).flatMap((p) => p.machining)
+      .some((o) => (o.depth ?? 0) > side.thickness)).toBe(false);
+
+    // …но валидатор обязан ловить её в данных из файла.
+    const broken = structuredClone(project());
+    const part = broken.furnitures.flatMap((f) => f.assemblies).flatMap((a) => a.parts)
+      .find((p) => String(p.id) === String(side.id))!;
+    part.machining.push({
+      id: 'broken-depth' as never, type: 'drilling', partId: side.id,
+      face: 'front', x: 100, y: 100, z: 0, diameter: 8, depth: 20,
+      through: false, origin: 'manual',
+    });
+    const issues = validateMachining(allOperations(broken), broken);
     expect(issues.some((i) => i.code === 'machining.depthExceeds' && i.severity === 'error')).toBe(true);
   });
 

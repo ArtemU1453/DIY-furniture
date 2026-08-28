@@ -6,7 +6,9 @@
  * они возвращают новые данные, а записывает их store одной командой, поэтому
  * любая из операций целиком ложится в undo/redo (§116/§117).
  */
-import type { Furniture, Hardware, HardwareConnection, Part, Project } from '@/core/model/types';
+import type {
+  EdgeMaterial, Furniture, Hardware, HardwareConnection, Material, Part, Project,
+} from '@/core/model/types';
 import type { FurnitureId } from '@/core/model/ids';
 import { newAssemblyId, newFurnitureId, newHardwareConnectionId, newPartId } from '@/core/model/ids';
 import { createFurniture, createAssembly } from '@/core/model/factory';
@@ -122,6 +124,10 @@ function cloneParts(parts: Part[]): { parts: Part[]; idMap: Map<string, string> 
 export interface CabinetCopy {
   furniture: Furniture;
   connections: HardwareConnection[];
+  /** Материалы, кромка и крепёж, которых нет в проекте-получателе (этап 38). */
+  materials?: Material[];
+  edges?: EdgeMaterial[];
+  hardware?: Hardware[];
 }
 
 /**
@@ -173,6 +179,17 @@ export interface CabinetClipboardFile {
   version: number;
   furniture: Furniture;
   connections: HardwareConnection[];
+  /**
+   * Материалы и кромка, на которые ссылаются детали (этап 38).
+   *
+   * Без них шкаф, вставленный в ДРУГОЙ проект, ссылался бы на чужие
+   * идентификаторы: детали оставались без материала, и проект переставал
+   * годиться для раскроя и спецификации.
+   */
+  materials?: Material[];
+  edges?: EdgeMaterial[];
+  /** Фурнитура, на которую ссылаются узлы шкафа (этап 38). */
+  hardware?: Hardware[];
 }
 
 /** Копировать шкаф в переносимый вид (§96). */
@@ -180,13 +197,26 @@ export function copyCabinet(project: Project, id: FurnitureId): string | null {
   const source = findFurniture(project, id);
   if (!source) return null;
   const ownIds = new Set(source.assemblies.flatMap((a) => a.parts.map((p) => String(p.id))));
+  const parts = source.assemblies.flatMap((a) => a.parts);
+  const usedMaterials = new Set(parts.map((p) => String(p.material)).filter(Boolean));
+  const usedEdges = new Set(
+    parts.flatMap((p) => Object.values(p.edges)).filter(Boolean).map((e) => String(e)),
+  );
+
+  const connections = project.hardwareConnections.filter(
+    (c) => ownIds.has(String(c.partAId)) && ownIds.has(String(c.partBId)),
+  );
+  const usedHardware = new Set(connections.map((c) => String(c.hardwareId)));
+
   const file: CabinetClipboardFile = {
     format: CABINET_CLIPBOARD_FORMAT,
     version: CABINET_CLIPBOARD_VERSION,
     furniture: source,
-    connections: project.hardwareConnections.filter(
-      (c) => ownIds.has(String(c.partAId)) && ownIds.has(String(c.partBId)),
-    ),
+    connections,
+    // Материалы и крепёж едут вместе со шкафом: в другом проекте у них другие id.
+    materials: project.materials.filter((m) => usedMaterials.has(String(m.id))),
+    edges: project.edges.filter((e) => usedEdges.has(String(e.id))),
+    hardware: project.hardware.filter((h) => usedHardware.has(String(h.id))),
   };
   return JSON.stringify(file);
 }
@@ -198,7 +228,19 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
  * Вставить шкаф из копии (§96). Как и импорт библиотек, читает ДАННЫЕ: ничего
  * не вычисляется и не выполняется, чужой файл отклоняется.
  */
-export function pasteCabinet(json: string, name?: string): CabinetCopy | null {
+/**
+ * Вставить шкаф из буфера (§96).
+ *
+ * project — проект, КУДА вставляют: материалы и кромка привязываются к нему
+ * (этап 38). Совпадающий по названию и толщине материал используется
+ * повторно, недостающий добавляется из буфера. Молча подменять материал
+ * другим нельзя: деталь уехала бы в цех не из того листа.
+ */
+export function pasteCabinet(
+  project: Project,
+  json: string,
+  name?: string,
+): CabinetCopy | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -215,7 +257,93 @@ export function pasteCabinet(json: string, name?: string): CabinetCopy | null {
     : [];
 
   // Тот же путь, что и у дубликата: копия получает собственные идентификаторы.
-  return duplicateFurnitureData(furniture, connections, name ?? `${furniture.name} (вставка)`);
+  const copy = duplicateFurnitureData(furniture, connections, name ?? `${furniture.name} (вставка)`);
+  return bindLibraries(
+    project,
+    copy,
+    Array.isArray(parsed.materials) ? (parsed.materials as Material[]) : [],
+    Array.isArray(parsed.edges) ? (parsed.edges as EdgeMaterial[]) : [],
+    Array.isArray(parsed.hardware) ? (parsed.hardware as Hardware[]) : [],
+  );
+}
+
+/** Одинаковые материалы: то же название и та же толщина. */
+const sameMaterial = (a: Material, b: Material) =>
+  a.name === b.name && Math.abs(a.thickness - b.thickness) < 1e-6;
+const sameEdge = (a: EdgeMaterial, b: EdgeMaterial) =>
+  a.name === b.name && Math.abs(a.thickness - b.thickness) < 1e-6;
+/** Одинаковый крепёж: тот же вид, название и артикул. */
+const sameHardware = (a: Hardware, b: Hardware) =>
+  a.category === b.category && a.name === b.name && (a.article ?? '') === (b.article ?? '');
+
+/**
+ * Привязать материалы, кромку и крепёж вставленного шкафа к проекту-получателю.
+ * Возвращает копию с исправленными ссылками и список позиций, которых в
+ * проекте не было и которые нужно добавить вместе со шкафом.
+ */
+function bindLibraries(
+  project: Project,
+  copy: CabinetCopy,
+  materials: Material[],
+  edges: EdgeMaterial[],
+  hardware: Hardware[],
+): CabinetCopy {
+  const materialMap = new Map<string, string>();
+  const edgeMap = new Map<string, string>();
+  const hardwareMap = new Map<string, string>();
+  const newMaterials: Material[] = [];
+  const newEdges: EdgeMaterial[] = [];
+  const newHardware: Hardware[] = [];
+
+  for (const material of materials) {
+    const existing = project.materials.find((m) => sameMaterial(m, material));
+    if (existing) {
+      materialMap.set(String(material.id), String(existing.id));
+    } else if (!project.materials.some((m) => String(m.id) === String(material.id))) {
+      newMaterials.push(structuredClone(material));
+    }
+  }
+  for (const edge of edges) {
+    const existing = project.edges.find((e) => sameEdge(e, edge));
+    if (existing) {
+      edgeMap.set(String(edge.id), String(existing.id));
+    } else if (!project.edges.some((e) => String(e.id) === String(edge.id))) {
+      newEdges.push(structuredClone(edge));
+    }
+  }
+
+  for (const item of hardware) {
+    const existing = project.hardware.find((h) => sameHardware(h, item));
+    if (existing) {
+      hardwareMap.set(String(item.id), String(existing.id));
+    } else if (!project.hardware.some((h) => String(h.id) === String(item.id))) {
+      newHardware.push(structuredClone(item));
+    }
+  }
+
+  for (const assembly of copy.furniture.assemblies) {
+    for (const part of assembly.parts) {
+      const material = materialMap.get(String(part.material));
+      if (material) part.material = material as Part['material'];
+      for (const side of ['left', 'right', 'top', 'bottom'] as const) {
+        const mapped = edgeMap.get(String(part.edges[side]));
+        if (mapped) part.edges[side] = mapped as Part['edges']['left'];
+      }
+    }
+  }
+
+  const connections = copy.connections.map((c) => {
+    const mapped = hardwareMap.get(String(c.hardwareId));
+    return mapped ? { ...c, hardwareId: mapped as HardwareConnection['hardwareId'] } : c;
+  });
+
+  return {
+    ...copy,
+    connections,
+    materials: newMaterials,
+    edges: newEdges,
+    hardware: newHardware,
+  };
 }
 
 // ── Удаление (§97) ───────────────────────────────────────────────────────────

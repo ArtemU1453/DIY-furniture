@@ -818,7 +818,7 @@ describe('Шкаф 28 — создание, дубликат, копирован
     expect(pastedId).toBeTruthy();
     expect(project().furnitures).toHaveLength(2);
     expect(partsOf(pastedId).length).toBe(partsOf(cabinet).length);
-    expect(pasteCabinet('{"format":"foreign"}')).toBeNull();
+    expect(pasteCabinet(project(), '{"format":"foreign"}')).toBeNull();
   });
 
   it('Тест 41/55 (§155): удаление шкафа убирает зависимости', () => {
