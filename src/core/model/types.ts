@@ -601,6 +601,88 @@ export interface HardwareInstance {
   quantity?: number;
   /** Порождена правилом или поставлена вручную (§132). */
   source?: 'rule' | 'manual';
+
+  // ── Этап 32: параметрическая фурнитура на детали ──────────────────────────
+  /** Грань детали, на которой стоит единица (§60). */
+  face?: PartFace;
+  /**
+   * Стабильный ключ детали (`metadata.key`), запомненный при установке (§76–§79).
+   *
+   * Перегенерация шкафа создаёт детали заново с новыми id, поэтому привязка
+   * только по partId теряла бы фурнитуру. Ключ переживает пересчёт.
+   */
+  partKey?: string;
+  /** Вид фурнитуры каталога (§2): HINGE, HANDLE, DRAWER_SLIDE и т.д. */
+  kind?: HardwareKind;
+  /** Правило параметрического размещения (§71/§72). */
+  placement?: PlacementRule;
+  /**
+   * Ручная правка положения (§80). Хранится отдельно от расчётного положения,
+   * поэтому Reset (§81) возвращает автоматическое место, ничего не теряя.
+   */
+  override?: { x?: Mm; y?: Mm; z?: Mm; rotation?: Rotation };
+  /** Положение зафиксировано — пересчёт его не двигает (§65). */
+  locked?: boolean;
+  /** Скрыта в 2D/3D (§66). */
+  hidden?: boolean;
+  /** Комплект, в который входит единица (§67/§68). */
+  setId?: string;
+}
+
+/**
+ * Единица фурнитуры на детали (§1). Это тот же HardwareInstance: отдельной
+ * параллельной модели не заводим, чтобы спецификация, присадка и производство
+ * продолжали видеть одни и те же данные.
+ */
+export type HardwareItem = HardwareInstance;
+
+/**
+ * Вид фурнитуры каталога (§2).
+ *
+ * Отличается от HardwareCategory тем, что это словарь КАТАЛОГА (внешнее имя),
+ * а категория — внутренний ключ правил присадки. Соответствие однозначное.
+ */
+export type HardwareKind =
+  | 'HINGE' | 'HANDLE' | 'DRAWER_SLIDE' | 'SHELF_PIN' | 'CONFIRMAT' | 'MINIFIX'
+  | 'DOWEL' | 'SCREW' | 'BRACKET' | 'LEG' | 'CASTER' | 'CONNECTOR' | 'LOCK' | 'OTHER';
+
+/**
+ * Комплект фурнитуры (§67–§70): чашка + ответная планка + саморезы.
+ *
+ * Комплект хранит только состав и привязку; количество компонентов считается
+ * из единиц (§69), а не дублируется в модели.
+ */
+export interface HardwareSet {
+  id: string;
+  name: string;
+  /** Единицы, входящие в комплект. */
+  itemIds: string[];
+  /** К чему привязан комплект (§70). */
+  parentId?: string;
+  parentKind?: 'PART' | 'MODULE' | 'CABINET';
+}
+
+/**
+ * Позиция каталога фурнитуры (§4/§5).
+ *
+ * Это Hardware из модели плюс каталожные признаки. Второй карточки фурнитуры
+ * не появляется: каталог хранит те же позиции, что попадают в проект.
+ */
+export interface HardwareCatalogEntry {
+  hardware: Hardware;
+  kind: HardwareKind;
+  /** Позиция создана пользователем (§6), а не входит во встроенный каталог. */
+  custom?: boolean;
+  favorite?: boolean;
+  /** Правила установки (§5): описание монтажа для схемы и подсказок. */
+  installation?: string;
+}
+
+/** Локальный каталог фурнитуры (§4/§117/§119). */
+export interface HardwareCatalog {
+  version: number;
+  entries: HardwareCatalogEntry[];
+  updatedAt?: string;
 }
 
 /**
@@ -612,7 +694,10 @@ export interface HardwareInstance {
  * DISTANCE  — фиксированное расстояние в мм;
  * PARAMETER — из параметра модуля или выражения.
  */
-export type PlacementReference = 'EDGE' | 'CENTER' | 'CORNER' | 'DISTANCE' | 'PARAMETER';
+export type PlacementReference =
+  | 'EDGE' | 'CENTER' | 'CORNER' | 'DISTANCE' | 'PARAMETER'
+  /** Этап 32 (§73): от плоскости детали, от оси и от другой фурнитуры. */
+  | 'FACE' | 'AXIS' | 'HARDWARE';
 
 /**
  * Правило параметрического размещения (§16/§79–§81).
@@ -627,10 +712,33 @@ export interface PlacementRule {
   x?: string | number;
   /** Выражение или число для координаты поперёк детали. */
   y?: string | number;
+  /** Выражение или число для координаты по толщине детали (§74). */
+  z?: string | number;
   /** Сторона отсчёта для EDGE/CORNER. */
   from?: 'left' | 'right' | 'top' | 'bottom';
   /** Отступ от опорной точки, мм. */
   offset?: Mm;
+  /** Грань детали, на которой стоит фурнитура (§73/§75). */
+  face?: PartFace;
+  /** Ось для reference: 'AXIS' (§73). */
+  axis?: 'X' | 'Y' | 'Z';
+  /** Опорная фурнитура для reference: 'HARDWARE' (§73). */
+  referenceId?: string;
+  /** Поворот относительно грани, градусы (§75/§31). */
+  orientation?: number;
+  /** Ограничения размещения (§72): минимальные отступы и допустимый размер. */
+  constraints?: PlacementConstraints;
+}
+
+/** Ограничения правила размещения (§72/§111–§113). */
+export interface PlacementConstraints {
+  /** Минимальный отступ от края детали, мм. */
+  minEdgeDistance?: Mm;
+  /** Минимальное расстояние между однотипными элементами, мм. */
+  minSpacing?: Mm;
+  /** Допустимый размер детали, мм: петля не встанет на узкий фасад. */
+  minPartSize?: Mm;
+  maxPartSize?: Mm;
 }
 
 /** Способ расстановки элементов массива (§87). */
@@ -1634,6 +1742,8 @@ export interface Project {
   hardwareKits?: HardwareKit[];
   /** Пресеты фурнитуры проекта (§64/§107). */
   hardwarePresets?: HardwarePreset[];
+  /** Комплекты установленной фурнитуры (§67–§70). */
+  hardwareItemSets?: HardwareSet[];
   /** Нормы расхода фурнитуры (§35): полкодержатели, крепёж задней стенки. */
   hardwareRules?: Record<string, number>;
   machining: MachiningState;

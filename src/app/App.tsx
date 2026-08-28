@@ -23,6 +23,7 @@ import { CabinetDesigner } from '@/components/panels/CabinetDesigner';
 import { InteractiveEditor } from '@/components/panels/InteractiveEditor';
 import { CuttingPrep } from '@/components/panels/CuttingPrep';
 import { ProductionCenter } from '@/components/panels/ProductionCenter';
+import { HardwareCatalogView } from '@/components/panels/HardwareCatalogView';
 import { ParametricPanel } from '@/components/panels/ParametricPanel';
 import { Scene3D, type CameraApi } from '@/features/designer/Scene3D';
 import { ModelTree } from '@/components/panels/ModelTree';
@@ -34,7 +35,7 @@ import { View2D } from '@/features/designer/View2D';
 import { createAutosaver } from '@/storage/backup/autosave';
 import { saveCurrentProject } from '@/features/project/projectActions';
 
-type CenterView = '3d' | 'editor2d' | 'interactive' | 'cabinet' | 'cuttingPrep' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'productionCenter' | 'modules';
+type CenterView = '3d' | 'editor2d' | 'interactive' | 'cabinet' | 'cuttingPrep' | 'connections' | 'table' | 'materials' | 'hardware' | 'machining' | 'cutting' | 'documents' | 'library' | 'parametric' | 'production' | 'productionCenter' | 'modules' | 'hardwareCatalog';
 type ViewMode = '3d' | '2d' | 'split';
 
 export function App() {
@@ -139,6 +140,7 @@ export function App() {
               ['parametric', 'Параметры'],
               ['production', 'Производство'],
               ['productionCenter', 'Цех'],
+              ['hardwareCatalog', 'Каталог фурнитуры'],
               ['documents', 'Документы'],
               ['library', 'Библиотека'],
             ] as Array<[CenterView, string]>
@@ -277,6 +279,9 @@ export function App() {
               onOpenCutting={() => setCenterView('cutting')}
               onOpenDocuments={() => setCenterView('documents')}
             />
+          )}
+          {centerView === 'hardwareCatalog' && (
+            <HardwareCatalogView onOpenPart={(id) => { selectPart(id as never); setCenterView('table'); }} />
           )}
           {centerView === 'documents' && (
             <DocumentsView

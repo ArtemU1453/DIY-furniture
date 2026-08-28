@@ -87,6 +87,13 @@ export function deserializeProject(json: string): Project {
   // Настройки чертежа и история генерации (этап 11).
   if (!project.documents.settings) project.documents.settings = { scaleOverrides: {}, hidden: {} };
   if (!Array.isArray(project.documents.history)) project.documents.history = [];
+  // Фурнитура на деталях и её комплекты (этап 32): полей может не быть.
+  if (project.hardwareInstances !== undefined && !Array.isArray(project.hardwareInstances)) {
+    project.hardwareInstances = [];
+  }
+  if (project.hardwareItemSets !== undefined && !Array.isArray(project.hardwareItemSets)) {
+    project.hardwareItemSets = [];
+  }
   // Производственное задание (этап 31): старые проекты открываются без него.
   if (project.production !== undefined) {
     if (typeof project.production !== 'object' || project.production === null) {

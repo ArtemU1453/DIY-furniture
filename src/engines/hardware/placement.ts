@@ -105,6 +105,26 @@ export function resolvePlacement(
       x = rx.value + offset;
       y = ry.value + offset;
       break;
+    case 'FACE': {
+      // Этап 32 (§73): от плоскости детали — центр грани плюс смещения.
+      x = scope.centerX + rx.value;
+      y = scope.centerY + ry.value;
+      break;
+    }
+    case 'AXIS': {
+      /* Ось детали (§73): вдоль X координата задаётся, поперёк — держится
+       * середины. Так ряд крепежа сам стоит на осевой линии. */
+      const axis = rule.axis ?? 'X';
+      x = axis === 'X' ? rx.value + offset : scope.centerX;
+      y = axis === 'Y' ? ry.value + offset : scope.centerY;
+      break;
+    }
+    case 'HARDWARE':
+      /* Опорная фурнитура (§73) не видна на уровне детали: смещения считает
+       * вызывающий код, у которого есть положение опорной единицы. */
+      x = rx.value + offset;
+      y = ry.value + offset;
+      break;
     case 'PARAMETER':
     default:
       x = rx.value;
