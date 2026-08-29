@@ -46,6 +46,11 @@ jobs:
 
       - name: Подготовить Pages
         uses: actions/configure-pages@v5
+        with:
+          # Включить Pages, если в репозитории они ещё не включены. Без этого
+          # первый запуск падает на «Get Pages site failed … Not Found»:
+          # шаг только читает настройку и не создаёт её.
+          enablement: true
 
       - name: Загрузить готовую сборку
         uses: actions/upload-pages-artifact@v3
