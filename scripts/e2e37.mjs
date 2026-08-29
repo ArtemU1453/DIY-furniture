@@ -13,9 +13,9 @@
  *   node scripts/e2e37.mjs http://localhost:4250/
  */
 import { chromium } from 'playwright-core';
+import { launchOptions } from './browser.mjs';
 import { writeFileSync, readFileSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
 
-const EXEC = '/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell';
 const URL = process.argv[2] ?? 'http://localhost:4250/';
 const SHOTS = '/tmp/e2e37';
 const EXPORT_PATH = '/tmp/e2e37-project.json';
@@ -23,7 +23,7 @@ const LEGACY_PATH = '/tmp/e2e37-legacy.json';
 
 mkdirSync(SHOTS, { recursive: true });
 
-const browser = await chromium.launch({ executablePath: EXEC });
+const browser = await chromium.launch(launchOptions());
 const ctx = await browser.newContext({ acceptDownloads: true });
 const page = await ctx.newPage();
 

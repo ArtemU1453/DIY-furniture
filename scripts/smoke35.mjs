@@ -9,11 +9,11 @@
  * Запуск:  npm run build && npx vite preview --port 4227 &  node scripts/smoke35.mjs
  */
 import { chromium } from 'playwright-core';
+import { launchOptions } from './browser.mjs';
 
-const EXEC = '/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell';
 const URL = process.argv[2] ?? 'http://localhost:4227/';
 
-const browser = await chromium.launch({ executablePath: EXEC });
+const browser = await chromium.launch(launchOptions());
 const ctx = await browser.newContext();
 const page = await ctx.newPage();
 
