@@ -207,7 +207,19 @@ export function ModulesView({ onOpenPart, onOpen3D }: {
               <button style={btn} onClick={() => setLocked(active.id, active.metadata?.locked !== true)}>
                 {active.metadata?.locked === true ? 'Разблокировать' : 'Заблокировать'}
               </button>
-              <button style={{ ...btn, color: 'var(--danger)' }} onClick={() => removeFurniture(active.id)}>Удалить</button>
+              {/* Удаление изделия уносит все его детали, кромку, фурнитуру и
+                * присадку. Одна деталь удаляется с подтверждением, поэтому
+                * целое изделие тем более не должно уходить по одному щелчку. */}
+              <button
+                style={{ ...btn, color: 'var(--danger)' }}
+                onClick={() => {
+                  const parts = active.assemblies.reduce((n, a) => n + a.parts.length, 0);
+                  const question = parts > 0
+                    ? `Удалить «${active.name}»? Вместе с ним уйдут ${parts} дет. и связанные с ними кромка, фурнитура и присадка.`
+                    : `Удалить «${active.name}»?`;
+                  if (window.confirm(question)) removeFurniture(active.id);
+                }}
+              >Удалить</button>
             </div>
 
             {/* Размещение и привязка (§87–§90) */}

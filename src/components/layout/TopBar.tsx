@@ -55,6 +55,7 @@ export function TopBar({ onOpenProjects, onOpenSettings, onNewProject, setStatus
       <input
         ref={fileInputRef}
         type="file"
+        aria-label="Файл проекта для импорта"
         accept=".json,application/json"
         style={{ display: 'none', width: 'auto' }}
         onChange={(e) => {

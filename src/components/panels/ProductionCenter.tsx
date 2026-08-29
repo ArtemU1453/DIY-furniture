@@ -136,13 +136,26 @@ export function ProductionCenter({
           <div style={row}>
             <span className="dim">Ревизия</span><span>{dashboard.revision}</span>
           </div>
+          {/* Пустой проект не бывает «готов на 100%»: проверять нечего, поэтому
+            * чек-лист и не находит ошибок. Показывать мастеру «готово», когда
+            * делать нечего, — прямая дезинформация, поэтому пустой случай
+            * назван своими словами. Расчёт готовности при этом не меняется. */}
           <div style={row}>
             <span className="dim">Готовность</span>
-            <span data-testid="production-progress">{dashboard.progress}%</span>
+            <span data-testid="production-progress">
+              {dashboard.parts === 0 ? 'нечего производить' : `${dashboard.progress}%`}
+            </span>
           </div>
-          <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden', margin: '4px 0 8px' }}>
-            <div style={{ width: `${dashboard.progress}%`, height: '100%', background: 'var(--accent)' }} />
-          </div>
+          {dashboard.parts > 0 && (
+            <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden', margin: '4px 0 8px' }}>
+              <div style={{ width: `${dashboard.progress}%`, height: '100%', background: 'var(--accent)' }} />
+            </div>
+          )}
+          {dashboard.parts === 0 && (
+            <div className="dim" style={{ fontSize: 11, margin: '4px 0 8px' }} data-testid="production-empty">
+              В проекте нет деталей. Создайте изделие — задание для цеха соберётся само.
+            </div>
+          )}
           <div style={row}>
             <span className="dim">Деталей</span><span>{dashboard.parts} ({dashboard.quantity} шт.)</span>
           </div>
