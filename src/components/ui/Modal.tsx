@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 
 interface Props {
   title: string;
@@ -7,6 +7,31 @@ interface Props {
 }
 
 export function Modal({ title, onClose, children }: Props) {
+  const titleId = useId();
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  /* Esc закрывает окно наравне с ✕ и щелчком по фону: человек, открывший
+   * диалог случайно, не должен искать глазами крестик. Обработчик висит на
+   * документе, потому что фокус может быть в любом поле внутри окна. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Фокус переходит внутрь окна, иначе клавиатура продолжает управлять фоном.
+  useEffect(() => {
+    const focusable = bodyRef.current?.querySelector<HTMLElement>(
+      'input, select, textarea, button, [href], [tabindex]:not([tabindex="-1"])',
+    );
+    focusable?.focus();
+  }, []);
+
   return (
     <div
       style={{
@@ -22,6 +47,9 @@ export function Modal({ title, onClose, children }: Props) {
     >
       <div
         className="modal-root"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         style={{
           background: 'var(--bg-panel)',
           border: '1px solid var(--border)',
@@ -42,10 +70,10 @@ export function Modal({ title, onClose, children }: Props) {
             borderBottom: '1px solid var(--border)',
           }}
         >
-          <strong>{title}</strong>
-          <button onClick={onClose}>✕</button>
+          <strong id={titleId}>{title}</strong>
+          <button onClick={onClose} aria-label="Закрыть окно">✕</button>
         </div>
-        <div style={{ padding: 14 }}>{children}</div>
+        <div ref={bodyRef} style={{ padding: 14 }}>{children}</div>
       </div>
     </div>
   );

@@ -74,34 +74,34 @@ export function CabinetPanel({ furnitureId }: { furnitureId: FurnitureId }) {
 
       <div className="panel-section">
         <h3>Конструкция</h3>
-        <div className="field">
-          <label>Верх</label>
+        <label className="field">
+          <span>Верх</span>
           <select value={params.top} onChange={(e) => set({ top: e.target.value as TopMount })}>
             {TOP_OPTIONS.map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
             ))}
           </select>
-        </div>
-        <div className="field">
-          <label>Низ</label>
+        </label>
+        <label className="field">
+          <span>Низ</span>
           <select value={params.bottom} onChange={(e) => set({ bottom: e.target.value as BottomMount })}>
             {BOTTOM_OPTIONS.map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
             ))}
           </select>
-        </div>
+        </label>
         <div className="field-row">
           <NumberField label="Полки (на секцию)" min={0} value={params.shelves} onCommit={(v) => set({ shelves: Math.max(0, Math.round(v)) })} />
           <NumberField label="Перегородки" min={0} value={params.dividers} onCommit={(v) => set({ dividers: Math.max(0, Math.round(v)) })} />
         </div>
-        <div className="field">
-          <label>Задняя стенка</label>
+        <label className="field">
+          <span>Задняя стенка</span>
           <select value={params.back} onChange={(e) => set({ back: e.target.value as BackType })}>
             {BACK_OPTIONS.map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
             ))}
           </select>
-        </div>
+        </label>
       </div>
 
       <div className="panel-section">
@@ -110,18 +110,18 @@ export function CabinetPanel({ furnitureId }: { furnitureId: FurnitureId }) {
           <NumberField label="Фасады" min={0} value={params.doors} onCommit={(v) => set({ doors: Math.max(0, Math.round(v)) })} />
           <NumberField label="Зазор фасадов" suffix="мм" min={0} value={params.doorGap} onCommit={(v) => set({ doorGap: Math.max(0, v) })} />
         </div>
-        <div className="field">
-          <label>Открывание</label>
+        <label className="field">
+          <span>Открывание</span>
           <select value={params.doorOpening} onChange={(e) => set({ doorOpening: e.target.value as DoorOpening })}>
             {DOOR_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
-        </div>
-        <div className="field">
-          <label>Соединение корпуса</label>
+        </label>
+        <label className="field">
+          <span>Соединение корпуса</span>
           <select value={params.jointType} onChange={(e) => set({ jointType: e.target.value as JointType })}>
             {JOINT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
-        </div>
+        </label>
         <label className="field" style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
           <input type="checkbox" checked={params.handleEnabled} onChange={(e) => set({ handleEnabled: e.target.checked })} />
           <span>Ручки на фасадах</span>

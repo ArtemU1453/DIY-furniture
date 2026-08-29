@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 
 interface Props {
   label: string;
@@ -16,6 +16,7 @@ interface Props {
  * что не мешает набирать промежуточные значения.
  */
 export function NumberField({ label, value, onCommit, min, max, step = 1, suffix }: Props) {
+  const inputId = useId();
   const [draft, setDraft] = useState(String(value));
 
   useEffect(() => {
@@ -36,11 +37,14 @@ export function NumberField({ label, value, onCommit, min, max, step = 1, suffix
 
   return (
     <div className="field">
-      <label>
+      {/* Подпись связана с полем через for/id: иначе программа чтения с экрана
+       * читает безымянное числовое поле, а щелчок по подписи не наводит фокус. */}
+      <label htmlFor={inputId}>
         {label}
         {suffix ? `, ${suffix}` : ''}
       </label>
       <input
+        id={inputId}
         type="number"
         value={draft}
         min={min}

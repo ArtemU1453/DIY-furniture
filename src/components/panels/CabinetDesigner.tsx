@@ -210,7 +210,18 @@ export function CabinetDesigner({ onOpenPart, onOpen3D }: {
       {preview && (
         <div className="dim" style={{ fontSize: 11, marginTop: 6 }} data-testid="wizard-preview">
           Деталей: {preview.parts} · Узлов: {preview.connections} · Материал: {preview.materialAreaM2} м²
-          {preview.issues.length > 0 && <div>Замечаний: {preview.issues.length}</div>}
+          {/* Замечания печатаются текстом, а не количеством: человек, который
+            * ввёл невозможный габарит, должен прочитать, что именно исправить,
+            * а не догадываться по числу. */}
+          {preview.issues.length > 0 && (
+            <ul data-testid="wizard-issues" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              {preview.issues.map((issue, i) => (
+                <li key={i} className={issue.severity === 'error' ? 'issue error' : 'issue warning'}>
+                  {issue.message}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
@@ -694,7 +705,7 @@ export function CabinetDesigner({ onOpenPart, onOpen3D }: {
             </div>
           ))}
           <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
-            <input placeholder="Имя пресета" value={presetName} data-testid="preset-name"
+            <input placeholder="Имя пресета" aria-label="Имя пресета" value={presetName} data-testid="preset-name"
               onChange={(e) => setPresetName(e.target.value)} style={{ width: 140 }} />
             <button data-testid="preset-save" onClick={() => {
               const preset = savePreset(activeId, presetName);
