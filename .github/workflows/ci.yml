@@ -1,0 +1,49 @@
+# Проверка кода: то же, что разработчик запускает у себя, но на каждый push
+# и каждый pull request. До этого набор гоняли вручную — здесь закрывается
+# именно этот пробел.
+#
+# Публикация живёт отдельно, в deploy.yml: проверка и выкладка не смешаны.
+# Выложить несобирающуюся версию всё равно нельзя — deploy.yml сам собирает
+# приложение и без успешной сборки до шага публикации не доходит.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Коду достаточно права на чтение: проверка ничего не публикует и не пишет.
+permissions:
+  contents: read
+
+# Новый push в ту же ветку отменяет предыдущую проверку — она уже неактуальна.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить исходники
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Версия, на которой проект собирается и проверяется локально.
+          node-version: '22'
+          cache: npm
+
+      - name: Установить зависимости
+        run: npm ci
+
+      - name: Линтер
+        run: npm run lint
+
+      - name: Тесты
+        run: npm test
+
+      - name: Сборка
+        run: npm run build
