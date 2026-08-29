@@ -327,6 +327,38 @@ await scenario('19 · отрицательный размер не попада�
   return `ширина осталась ${before}`;
 });
 
+// ── 19b. Добавление детали вручную ─────────────────────────────────────────
+await scenario('19b · деталь добавляется вручную и попадает в производство', async () => {
+  await openTab('Детали', 700);
+  const before = await rows();
+  // «+ элемент» в дереве конструкции слева → выбор вида детали.
+  await page.locator('button', { hasText: '+ элемент' }).first().click();
+  await page.waitForTimeout(250);
+  await page.locator('button', { hasText: 'Полка' }).first().click();
+  await page.waitForTimeout(700);
+
+  await openTab('Детали', 700);
+  const after = await rows();
+  expect('в таблице деталей стало на одну строку больше', after, before + 1);
+
+  // Добавленная вручную деталь должна дойти до цеха, а не остаться в UI.
+  await openTab('Цех', 900);
+  const shop = await bodyText();
+  expect('цех пересчитал состав с новой деталью', shop.length, 40, atLeast);
+  return `деталей: ${before} → ${after}`;
+});
+
+// ── 19c. Модули изделия ────────────────────────────────────────────────────
+await scenario('19c · модули изделия видны и считаются из модели', async () => {
+  await openTab('Модули', 900);
+  // Заголовок печатается капителью (text-transform), поэтому сверка без регистра.
+  const text = await bodyText();
+  expect('раздел модулей открылся', /модули/i.test(text), true);
+  const shown = Number((text.match(/модули\s*\((\d+)\)/i) ?? [])[1] ?? 0);
+  expect('в изделии есть хотя бы один модуль', shown, 1, atLeast);
+  return `модулей: ${shown}`;
+});
+
 // ── 20. Старый проект ──────────────────────────────────────────────────────
 await scenario('20 · старый проект открывается со своей схемой и геометрией', async () => {
   /* Файл в старом формате: параметры шкафа без параметрической модели и
