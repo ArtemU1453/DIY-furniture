@@ -450,31 +450,39 @@ export function Viewer3D({
           ))}
         </div>
 
-        <h3 style={{ ...hdr, marginTop: 12 }}>Отладка</h3>
+        <h3 style={{ ...hdr, marginTop: 12 }}>Снимок</h3>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, marginBottom: 4 }}>
-          <label style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-            <input
-              type="checkbox"
-              data-testid="debug-toggle"
-              checked={scene3d.debug}
-              onChange={(e) => setSceneState({ debug: e.target.checked })}
-            />
-            3D Debug
-          </label>
-          <select
-            data-testid="debug-space"
-            value={scene3d.space}
-            onChange={(e) => setSceneState({ space: e.target.value as 'LOCAL' | 'WORLD' })}
-          >
-            <option value="WORLD">World</option>
-            <option value="LOCAL">Local</option>
-          </select>
           <button data-testid="scene-screenshot" onClick={() => {
             const data = captureRef.current?.capture();
             note(data ? `Снимок: ${Math.round(data.length / 1024)} КБ` : 'Снимок недоступен.');
           }}>Снимок PNG</button>
+          {/* Диагностика разработчика: идентификаторы узлов и координаты сцены.
+            * Мастеру за станком это ни о чём не говорит, поэтому в собранное
+            * приложение блок не попадает — Vite подставляет false и вырезает
+            * ветку при сборке. В режиме разработки он остаётся. */}
+          {import.meta.env.DEV && (
+            <>
+              <label style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  data-testid="debug-toggle"
+                  checked={scene3d.debug}
+                  onChange={(e) => setSceneState({ debug: e.target.checked })}
+                />
+                3D Debug
+              </label>
+              <select
+                data-testid="debug-space"
+                value={scene3d.space}
+                onChange={(e) => setSceneState({ space: e.target.value as 'LOCAL' | 'WORLD' })}
+              >
+                <option value="WORLD">World</option>
+                <option value="LOCAL">Local</option>
+              </select>
+            </>
+          )}
         </div>
-        {scene3d.debug && debug && (
+        {import.meta.env.DEV && scene3d.debug && debug && (
           <div data-testid="debug-info" className="dim" style={{ fontSize: 10 }}>
             <div>Node: {debug.nodeId}</div>
             <div>Ref: {debug.refId ?? '—'}</div>
