@@ -1,6 +1,7 @@
 import { chromium } from 'playwright-core';
+import { launchOptions } from './browser.mjs';
 const URL = process.argv[2];
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell' });
+const browser = await chromium.launch(launchOptions());
 const ctx = await browser.newContext();
 const page = await ctx.newPage();
 const errors = [];

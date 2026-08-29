@@ -3,8 +3,8 @@
 # именно этот пробел.
 #
 # Публикация живёт отдельно, в deploy.yml: проверка и выкладка не смешаны.
-# Выложить несобирающуюся версию всё равно нельзя — deploy.yml сам собирает
-# приложение и без успешной сборки до шага публикации не доходит.
+# Выложить непроверенную версию всё равно нельзя — deploy.yml сам прогоняет
+# линтер, тесты и сборку и без их успеха до шага публикации не доходит.
 name: CI
 
 on:
@@ -47,3 +47,66 @@ jobs:
 
       - name: Сборка
         run: npm run build
+
+  # Критический путь в настоящем браузере. Модульные тесты идут в jsdom и
+  # не видят того, что ломается только в браузере: загрузку чанков, работу
+  # собранного приложения, отсутствие обращений наружу. Поэтому сценарии
+  # гоняются по СОБРАННОМУ приложению через vite preview — ровно так же, как
+  # локально.
+  #
+  # Job отдельный и не блокирует checks: браузер ставится долго, и падение
+  # одного не должно скрывать причину падения другого.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить исходники
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Установить зависимости
+        run: npm ci
+
+      # Только headless-оболочка: сценарии идут без окна, полный Chromium не
+      # нужен. --with-deps доставляет системные библиотеки браузера.
+      - name: Установить браузер
+        run: npx playwright-core install --with-deps --only-shell --no-progress chromium
+
+      - name: Собрать приложение
+        run: npm run build
+
+      # Предпросмотр собранного приложения. Ждём готовности порта, а не спим
+      # фиксированное время: иначе сценарии стартуют по таймеру и падают
+      # случайно.
+      - name: Запустить предпросмотр
+        run: |
+          nohup npx vite preview --port 4173 --strictPort > /tmp/preview.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://localhost:4173/; then
+              echo "Предпросмотр отвечает"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Предпросмотр не поднялся за 60 с"
+          cat /tmp/preview.log
+          exit 1
+
+      - name: Сквозные сценарии
+        run: npm run e2e -- http://localhost:4173/
+
+      - name: Приёмочный сценарий
+        run: npm run acceptance -- http://localhost:4173/
+
+      # Снимки экрана падений: без них причина провала в CI не видна.
+      - name: Снимки при падении
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: /tmp/e2e37
+          if-no-files-found: ignore
