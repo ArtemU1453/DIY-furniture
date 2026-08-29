@@ -1,0 +1,64 @@
+# Публикация конструктора на GitHub Pages.
+#
+# Пользователь открывает https://artemu1453.github.io/DIY-furniture/ и сразу
+# работает: приложение полностью локальное, без сервера и регистрации.
+#
+# Сборка та же, что и у разработчика, — npm run build. Второго конвейера нет.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  # Позволяет опубликовать вручную, не дожидаясь следующего push.
+  workflow_dispatch:
+
+# Права минимальные: код только читается, писать разрешено лишь в Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Одна публикация за раз; начатую не прерываем, чтобы сайт не остался
+# наполовину обновлённым.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить исходники
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          # Версия, на которой проект собирается и проверяется локально.
+          node-version: '22'
+          cache: npm
+
+      - name: Установить зависимости
+        run: npm ci
+
+      - name: Собрать приложение
+        run: npm run build
+
+      - name: Подготовить Pages
+        uses: actions/configure-pages@v5
+
+      - name: Загрузить готовую сборку
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Опубликовать
+        id: deployment
+        uses: actions/deploy-pages@v4
