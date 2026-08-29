@@ -23,12 +23,23 @@ export function serializeProject(project: Project): string {
   return JSON.stringify(project, null, 2);
 }
 
-/** Проверка минимальной структуры объекта проекта. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Проверка минимальной структуры объекта проекта.
+ *
+ * Проверяются не только поля верхнего уровня, но и вложенность, по которой
+ * приложение обходит модель: изделия → сборки → детали. Файл, где эта
+ * вложенность нарушена, обязан быть отклонён ЗДЕСЬ: дальше по цепочке идёт
+ * loadProject, который заменяет открытый проект, и пользователь потерял бы
+ * свою работу ради файла, на котором всё равно падает каждый раздел.
+ */
 function assertProjectShape(value: unknown): asserts value is Project {
-  if (typeof value !== 'object' || value === null) {
+  if (!isRecord(value)) {
     throw new ProjectParseError('Файл не является объектом проекта.');
   }
-  const p = value as Record<string, unknown>;
+  const p = value;
   const requiredArrays = ['materials', 'edges', 'hardware', 'furnitures'];
   for (const key of requiredArrays) {
     if (!Array.isArray(p[key])) {
@@ -40,6 +51,32 @@ function assertProjectShape(value: unknown): asserts value is Project {
   }
   if (typeof p.version !== 'string') {
     throw new ProjectParseError('Отсутствует версия формата.');
+  }
+  // Библиотеки: записи должны быть объектами — по ним ищут id, имя, толщину.
+  for (const key of ['materials', 'edges', 'hardware']) {
+    if (!(p[key] as unknown[]).every(isRecord)) {
+      throw new ProjectParseError(`Повреждено содержимое поля «${key}».`);
+    }
+  }
+  // Изделия → сборки → детали: та вложенность, по которой считается модель.
+  for (const furniture of p.furnitures as unknown[]) {
+    if (!isRecord(furniture)) {
+      throw new ProjectParseError('Повреждено изделие в файле проекта.');
+    }
+    if (!Array.isArray(furniture.assemblies)) {
+      throw new ProjectParseError('У изделия в файле отсутствует список сборок.');
+    }
+    for (const assembly of furniture.assemblies) {
+      if (!isRecord(assembly)) {
+        throw new ProjectParseError('Повреждена сборка в файле проекта.');
+      }
+      if (!Array.isArray(assembly.parts)) {
+        throw new ProjectParseError('У сборки в файле отсутствует список деталей.');
+      }
+      if (!assembly.parts.every(isRecord)) {
+        throw new ProjectParseError('Повреждена деталь в файле проекта.');
+      }
+    }
   }
 }
 
